@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:ai.google.dev)",
+      "WebSearch",
+      "Bash(uv --version)",
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests/unit/codegen -v --tb=short)",
+      "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests/unit -v --tb=short)",
+      "Bash(.venv/bin/python -c \"import apache_beam; print\\('beam', apache_beam.__version__\\)\")",
+      "Bash(.venv/bin/python -c \"import apache_beam; print\\(apache_beam.__version__\\)\")",
+      "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests -v --tb=short)",
+      "Bash(.venv/bin/python -c \"from google.cloud import bigquery; print\\('bq', bigquery.__version__\\)\")"
+    ]
+  }
+}
