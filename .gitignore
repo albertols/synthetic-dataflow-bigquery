@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# uv / virtualenvs
+.venv/
+.venv-*/
+uv.lock.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local pipeline artifacts
+output/
+temp/
+*.log
+local-ssd/
+.beam/
+
+# NEVER commit model weights — they live in gs://{project}-models/
+models/
+*.safetensors
+*.gguf
+*.bin
+*.pt
+
+# GCP / credentials — should never reach the repo
+*.json.key
+service-account-*.json
+.gcloud/
+application_default_credentials.json
