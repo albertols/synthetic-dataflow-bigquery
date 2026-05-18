@@ -28,6 +28,11 @@ sdfb-tests = { workspace = true }
 
 [dependency-groups]
 dev = [
+    # Workspace member — transitively pulls sdfb-core and sdfb-beam in via
+    # sdfb-tests' own dependencies. Without this entry, `uv sync --group dev`
+    # leaves the workspace packages uninstalled because the root has no
+    # dependencies of its own (`package = false`).
+    "sdfb-tests",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
     "pytest>=8.0.0",
