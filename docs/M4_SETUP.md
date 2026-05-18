@@ -93,6 +93,32 @@ If any test fails: paste the last ~30 lines back — that's the fastest signal s
 3. In the Project view, right-click `packages/sdfb-tests/tests` → Mark Directory As → "Test Sources Root".
 4. (Optional) Right-click `packages/sdfb-core/src` and `packages/sdfb-beam/src` → Mark Directory As → "Sources Root". PyCharm then resolves imports correctly without the `pythonpath` hack.
 
+### 5b. Per-machine env vars via `direnv` (recommended)
+
+If your machine sits behind a corporate proxy or needs a custom CA bundle, encode the env vars in a repo-local `.envrc` so every shell + IDE that enters the directory picks them up automatically. The real `.envrc` is gitignored; commit only `.envrc.example`.
+
+```bash
+brew install direnv
+echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc       # or your shell rc
+source ~/.zshrc
+cp .envrc.example .envrc
+# edit .envrc — uncomment + set HTTP_PROXY / HTTPS_PROXY / NO_PROXY for
+# YOUR machine. For db.com networks the working egress proxy for
+# googleapis.com is `sdod3-proxy.intranet.db.com:8080`, NOT the general
+# browsing proxy.
+direnv allow
+```
+
+To verify direnv is active: `cd` out of the repo and back in — you should see `direnv: loading .envrc`. To verify the proxy actually reaches BigQuery:
+
+```bash
+uv run python -c "from google.cloud import bigquery; c = bigquery.Client(project='$(gcloud config get-value project)'); print(list(c.query('SELECT 1 AS x', timeout=30).result(timeout=30)))"
+```
+
+Expected: `[Row((1,), {'x': 0})]` in <5s.
+
+PyCharm: install the **EnvFile** plugin (or 2024.3+ has direnv recognition) so the run configs inherit `.envrc` env vars without manual duplication.
+
 ### 6. GCP auth
 
 ```bash

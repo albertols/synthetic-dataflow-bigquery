@@ -24,6 +24,11 @@ uv.lock.local
 *.swp
 *.swo
 
+# direnv — real .envrc is per-machine and may contain proxy URLs / cert paths
+# (template is .envrc.example, committed)
+.envrc
+.direnv/
+
 # Local pipeline artifacts
 output/
 temp/
