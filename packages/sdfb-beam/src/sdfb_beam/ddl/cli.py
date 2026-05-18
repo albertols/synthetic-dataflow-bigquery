@@ -54,9 +54,15 @@ def main(argv: list[str] | None = None) -> int:
 
     args, pipeline_args = parser.parse_known_args(argv)
 
+    # `force=True` is critical: Beam's import side-effects configure the
+    # root logger before we get here, which makes a plain `basicConfig`
+    # call a silent no-op. Without `force=True` the entire INFO-level
+    # banner + preflight + progress stream disappears and the script
+    # looks frozen.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+        force=True,
     )
 
     logger.info("=" * 60)
