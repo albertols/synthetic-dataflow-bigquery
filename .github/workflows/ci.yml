@@ -22,16 +22,22 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        # v6 runs on Node 24 (the v3 we used previously is being deprecated;
+        # see the Node 20 deprecation notice on prior CI runs).
+        uses: astral-sh/setup-uv@v6
         with:
           version: latest
           enable-cache: true
-
-      - name: Install Python 3.11
-        run: uv python install 3.11
+          # Cache key falls back to pyproject.toml if uv.lock is absent.
+          # Avoids a CI failure during the brief window between a new
+          # dependency landing in a pyproject and the uv.lock being committed.
+          cache-dependency-glob: |
+            **/uv.lock
+            **/pyproject.toml
+          python-version: "3.11"
 
       - name: Sync workspace
         run: uv sync --group dev

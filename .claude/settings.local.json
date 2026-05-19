@@ -15,7 +15,8 @@
       "Bash(chmod +x *)",
       "Bash(git fetch *)",
       "Bash(.venv/bin/python -m pytest --collect-only -q)",
-      "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests -q --tb=short)"
+      "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests -q --tb=short)",
+      "Bash(~/.local/bin/uv lock *)"
     ]
   }
 }
