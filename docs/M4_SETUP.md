@@ -161,60 +161,38 @@ Output lands in `./output/<dataset>/ddl_metadata_<dataset>_<table>.json`.
 
 Paste back the `head -50` of the file (or the full JSON if small). If `TableSchema.model_validate()` accepts it cleanly on the M4, the whole DDL extractor chain is verified against real BigQuery — not just mocked clients.
 
-### Step B — pick one of #10 (`Dockerfile.gpu`) or #6 (B.2 library spike)
+### Step B — #10 (`Dockerfile.gpu`)
 
-**Recommend #10 first.** The GPU container is the longest pole — once it builds and a 1-row probe job succeeds on a real L4 worker, every other M4 task gets faster to iterate.
+GPU container is the longest pole on the M1 critical path — once it builds and a 1-row probe job succeeds on a real L4 worker, every other M4 task gets faster to iterate. Full runbook: **[`GPU_CONTAINER.md`](GPU_CONTAINER.md)**. Covers preflight (uv.lock, quota, Docker), build / push / probe, what-to-send-back, and the GPU-specific gotchas.
 
-**#6 (sdgx vs DataDreamer bake-off)** is technically laptop-doable, but realistic fit timing needs the M4. Run it after #10 if you want to interleave.
+**#6 (sdgx vs DataDreamer bake-off)** is technically laptop-doable, but realistic fit timing needs the M4. Interleave after #10 if you want.
 
 ### Step C — #9 (vLLM `ModelHandler`)
 
-Depends on having weights in GCS, so the prerequisite chain is:
-
-1. Pull Gemma 4 E4B per `MODEL_LAYOUT.md` § "How to download".
-2. `gsutil -m cp -r` weights to `gs://<project>-models/gemma4/e4b/v1/`.
-3. Then #9.
+Depends on having weights in GCS. Layout, download procedure, and runtime-load snippets: **[`MODEL_LAYOUT.md`](MODEL_LAYOUT.md)**. Pull Gemma 4 E4B → `gsutil cp -r` to `gs://<project>-models/gemma4/e4b/v1/` → then implement #9.
 
 ### Step D — #11 (end-to-end on Dataflow) + #12 (thresholds + `validation_runs` table)
 
 After #9 + #10 are stable. This is the M1 finish line.
 
-## Gotchas worth flagging now
+## Cross-doc map
 
-- **`apache-beam[gcp]` on M4 ARM**: works fine for DirectRunner and for *submitting* Dataflow jobs. Dataflow workers run in their own Linux/x86 container regardless of where the submitter runs, so the M4 architecture is irrelevant to job execution. Just don't try to *locally simulate* GPU workers on the M4.
+When you need information on a concern, go here — don't restate it elsewhere.
 
-- **L4 GPU quota** (before #10 / #11): verify quota *before* you build the container — quota requests can take days.
+- **Building / pushing / probing the GPU image; L4 quota; region flags** → [`GPU_CONTAINER.md`](GPU_CONTAINER.md)
+- **Model weights** — GCS layout, Kaggle download, runtime load, Apple-Silicon caveat → [`MODEL_LAYOUT.md`](MODEL_LAYOUT.md)
+- **Locked architecture decisions**, package contract, hard constraints → [`../CLAUDE.md`](../CLAUDE.md)
+- **Recipe cards** (DoFn lifecycle, model handler, Mode A validation, …) → `../.claude/skills/*.md`
+- **Sub-agent boundaries** (ddl-codegen, gpu-image-builder, b1-rag-engineer, …) → `../.claude/agents/*.md`
 
-  ```bash
-  gcloud compute project-info describe \
-      --project="$(gcloud config get-value project)" \
-      --flatten='quotas[]' \
-      --format='table(quotas.metric,quotas.limit,quotas.usage)' \
-    | grep -iE 'l4|gpu|nvidia'
-  ```
-
-  If the limit for the L4 metric is 0 in your target region, file a quota request via the Cloud Console (IAM & Admin → Quotas).
-
-- **Region selection**: pick a region where `g2-standard-*` machine types and L4 GPUs exist. Safe defaults: `europe-west4`, `us-central1`. The Dataflow GPU support matrix changes — verify at submission time via the docs in `.claude/skills/gpu-dockerfile.md`.
-
-- **vLLM is CUDA-only** — don't try to run vLLM on the M4's GPU. For real local inference on M4 the practical backends are MLX / llama.cpp / Ollama (see `MODEL_LAYOUT.md` § "Apple Silicon caveat"). For M1, `FakeModelClient` on M4 + `VLLMModelClient` on Dataflow is the complete path; a local MLX backend is a stretch goal.
-
-- **Kaggle CLI auth**: needed for downloading Gemma weights. Drop `~/.kaggle/kaggle.json` (from Kaggle Settings → API) with `chmod 600`. The license must be accepted in the browser once per model — `pip install kaggle` doesn't help if you haven't clicked "Accept" on https://kaggle.com/models/google/gemma-4.
-
-- **The `whylogs` warning the laptop venv showed**: was an artifact of using `--no-deps` to skip heavy packages. On the M4 with the full `uv sync`, whylogs installs cleanly — no warning.
-
-## What lives where (quick map)
+## Repo layout
 
 ```
-CLAUDE.md                         the session-spanning project context
-docs/MODEL_LAYOUT.md              where model weights live
-docs/M4_SETUP.md                  THIS FILE
-.claude/skills/*.md               recipe cards (load on demand)
-.claude/agents/*.md               sub-agent definitions
-packages/sdfb-core/               pure-Python contracts + ABC + codegen
+packages/sdfb-core/               pure-Python contracts + ABC + codegen (laptop-installable)
 packages/sdfb-beam/               Beam pipeline + DoFns + DDL extractor
-packages/sdfb-tests/              68 unit + integration tests
-scripts/extract_ddl.py            DDL extraction CLI shim
+packages/sdfb-tests/              unit + integration tests
+docker/                           Dockerfile.gpu + .dockerignore
+scripts/                          build/push image, extract_ddl CLI shim
 config/                           thresholds.yml + models.yml (M1 §12 — TBD)
 docker/                           Dockerfile.gpu + entrypoint (M1 §10 — TBD)
 ```

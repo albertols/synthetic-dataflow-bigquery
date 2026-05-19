@@ -1,0 +1,82 @@
+# synthetic-dataflow-bigquery — GPU worker image for Dataflow L4 workers.
+#
+# REFs:
+#   https://docs.cloud.google.com/dataflow/docs/gpu/use-l4-gpus
+#   https://docs.cloud.google.com/dataflow/docs/gpu/develop-with-gpus
+#   https://docs.cloud.google.com/dataflow/docs/guides/build-container-image
+#   https://docs.vllm.ai/en/latest/getting_started/installation.html
+#
+# Build:   ./scripts/build_gpu_image.sh
+# Push:    ./scripts/push_gpu_image.sh
+# Verify:  see docs/GPU_CONTAINER.md ("1-row probe" section)
+
+# ---------------------------------------------------------------------------
+# Stage 1 — pull Beam SDK worker bits from the official image.
+# Pin to match the laptop venv (apache-beam 2.73.0).
+# ---------------------------------------------------------------------------
+FROM apache/beam_python3.11_sdk:2.73.0 AS beam_sdk
+
+# ---------------------------------------------------------------------------
+# Stage 2 — CUDA 12.4.1 + cuDNN runtime base, Python 3.11, gcloud, uv deps.
+# Runtime variant (no compiler) keeps the image small; vLLM ships its own
+# precompiled wheels.
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    # Hard-block any HuggingFace Hub network call at runtime — weights live in
+    # GCS, the `transformers` library is a file-format reader only.
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    # Required for Python ML inference paths on Dataflow.
+    BEAM_PYTHON_SDK_OPTIONS="--experiments=use_runner_v2"
+
+# System deps:
+#   python 3.11 — matches the Beam SDK overlay below.
+#   gcloud / gsutil — for the per-worker model warm-pull from GCS to /local-ssd.
+#   curl / ca-certs — gcloud apt repo bootstrap.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3.11-dev python3-pip \
+        ca-certificates curl gnupg apt-transport-https \
+    && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] \
+        https://packages.cloud.google.com/apt cloud-sdk main" \
+        > /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && apt-get update && apt-get install -y --no-install-recommends google-cloud-cli \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# Overlay Beam Python SDK worker bits onto the CUDA base.
+COPY --from=beam_sdk /opt/apache/beam /opt/apache/beam
+
+# uv for fast deterministic deps install.
+RUN pip install --no-cache-dir uv
+
+WORKDIR /workspace
+
+# Layer caching strategy: pyprojects + uv.lock first (rebuilds when deps
+# change), source files after (rebuilds when code changes, not deps).
+COPY pyproject.toml uv.lock README.md ./
+COPY packages/sdfb-core/pyproject.toml packages/sdfb-core/pyproject.toml
+COPY packages/sdfb-beam/pyproject.toml packages/sdfb-beam/pyproject.toml
+COPY packages/sdfb-tests/pyproject.toml packages/sdfb-tests/pyproject.toml
+
+# Install workspace + GPU / embedding / library extras.
+# --frozen requires uv.lock to be committed; if absent, build fails fast.
+# --no-dev skips ruff / mypy / pytest (test-only deps not needed on workers).
+RUN uv sync --frozen --no-dev --all-packages \
+        --extra gpu --extra embedding --extra library
+
+# Source last so source-only edits don't invalidate the deps layer.
+COPY packages/sdfb-core/src packages/sdfb-core/src
+COPY packages/sdfb-beam/src packages/sdfb-beam/src
+
+# Ensure the workspace site-packages + source roots are on PYTHONPATH so
+# Beam's `boot` entrypoint can import `sdfb_beam.*` without --setup_file.
+ENV PYTHONPATH="/workspace/.venv/lib/python3.11/site-packages:/workspace/packages/sdfb-core/src:/workspace/packages/sdfb-beam/src"
+
+ENTRYPOINT ["/opt/apache/beam/boot"]
