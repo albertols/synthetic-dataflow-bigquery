@@ -150,7 +150,7 @@ def setup(self):
     )
 ```
 
-`HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set in the GPU `Dockerfile.gpu` (M1 §10) so any accidental Hub call fails loudly. The model directory must be self-contained.
+`HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set in `docker/Dockerfile` (M1 §10) so any accidental Hub call fails loudly. The model directory must be self-contained.
 
 ## Runtime load — local M4 (stretch goal, MLX example)
 

@@ -1,40 +1,20 @@
 ---
 name: gpu-dockerfile
-description: Recipe for the L4 GPU Dataflow custom container — CUDA base + Beam SDK overlay + vLLM, with model warm-pull from GCS at worker startup (not container build). Load when working on `docker/Dockerfile.gpu` or the deploy scripts.
+description: Recipe for the L4 GPU Dataflow custom container — CUDA base + Beam SDK overlay + Flex Template launcher + vLLM, with model warm-pull from GCS at worker startup (not container build). Load when working on `docker/Dockerfile` or the CI workflows that build it.
 ---
 
 # Skill — GPU Dockerfile
 
-Dataflow runs custom containers for Python jobs. The L4 GPU path requires CUDA 12 + the Beam Python SDK worker bits + vLLM, plus a runtime model warm-pull from GCS at worker startup. Container size matters for cold-start latency — keep weights OUT of the image.
+> **Source of truth** for the actual image is **`docker/Dockerfile`** in this repo. The CI build/push pipeline is **`.github/workflows/1_build_python_beam.yaml`** and the operational runbook is **[`docs/CICD.md`](../../docs/CICD.md)**. This skill is a recipe for working on those files — not a copy of their content.
 
-## File: `docker/Dockerfile.gpu`
+## The two-contract trick
 
-Skeleton (write the real file when picking up this skill; pin versions before building):
+Dataflow runs the same image in two different ways depending on what called it:
 
-```dockerfile
-# REF: https://docs.cloud.google.com/dataflow/docs/gpu/use-l4-gpus
-# REF: https://docs.cloud.google.com/dataflow/docs/gpu/develop-with-gpus
-# REF: https://docs.cloud.google.com/dataflow/docs/guides/build-container-image
+- **Flex Template launch** → uses the image's `ENTRYPOINT`, which is `/opt/google/dataflow/python_template_launcher`. The launcher reads `FLEX_TEMPLATE_PYTHON_PY_FILE` (set to `sdfb_beam.cli.run_pipeline`) and submits the job.
+- **Dataflow workers** → invoked with an explicit `--entrypoint=/opt/apache/beam/boot` override; image ENTRYPOINT is irrelevant. `boot` just needs to exist at that path.
 
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
-
-# Overlay Beam Python SDK worker bits onto the CUDA base.
-COPY --from=apache/beam_python3.11_sdk:2.60.0 /opt/apache/beam /opt/apache/beam
-
-RUN pip install --no-cache-dir uv
-WORKDIR /workspace
-COPY pyproject.toml uv.lock packages/ ./
-RUN uv sync --frozen --no-dev \
-    --package sdfb-beam \
-    --extra gpu --extra embedding --extra library
-
-# Hard-block any HF Hub network call — weights come from GCS only.
-ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-# Runner v2 is required for Python ML inference paths on Dataflow.
-ENV BEAM_PYTHON_SDK_OPTIONS="--experiments=use_runner_v2"
-
-ENTRYPOINT ["/opt/apache/beam/boot"]
-```
+Both binaries are copied into the final image via multi-stage `COPY --from`. See [ADR 0009](../../docs/adr/0009-single-flex-template-image.md) for the rationale.
 
 ## Launch flags
 
@@ -43,18 +23,21 @@ ENTRYPOINT ["/opt/apache/beam/boot"]
 --dataflow_service_options="worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver"
 --worker_machine_type="g2-standard-8"
 --experiments=use_runner_v2
---sdk_container_image="${ARTIFACTORY}/sdfb-gpu:${VERSION}"
+--sdk_container_image="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/sdfb-python:${VERSION}"
 --worker_disk_type=pd-ssd
 --worker_disk_size_gb=200
+--image-repository-username-secret-id="projects/${PROJECT}/secrets/ARTIFACTORY_RELEASER_USERNAME"
+--image-repository-password-secret-id="projects/${PROJECT}/secrets/ARTIFACTORY_RELEASER_PASSWORD"
 ```
 
-`g2-standard-8` = 1×L4 (24GB VRAM), 8 vCPU, 32GB RAM. Upgrade to `g2-standard-24` if NVIDIA MPS is needed for multi-process GPU sharing.
+`g2-standard-8` = 1×L4 (24 GB VRAM), 8 vCPU, 32 GB RAM. Upgrade to `g2-standard-24` if NVIDIA MPS is needed for multi-process GPU sharing.
 
 ## Model warm-pull
 
-Done in `DoFn.setup()`, not the container:
+The image is intentionally weights-free. Model weights live in `gs://{project}-models/{family}/{model}/{version}/` and are pulled once per worker lifetime inside the `ModelClient.setup()` method:
 
 ```python
+# packages/sdfb-beam/src/sdfb_beam/handlers/vllm_client.py (real impl in M1 §9)
 def setup(self):
     subprocess.run(
         ["gsutil", "-m", "cp", "-r", self.model_uri, "/local-ssd/model/"],
@@ -64,7 +47,7 @@ def setup(self):
     self.llm = LLM(model="/local-ssd/model", quantization="awq", ...)
 ```
 
-This keeps the container ~3GB instead of ~15GB with weights baked in. Worker cold-start budget: ≤ 3 min total, including this pull.
+This keeps the image ~3 GB instead of ~15 GB with weights baked in. Worker cold-start budget: ≤ 3 min total, including this pull. See [`docs/MODEL_LAYOUT.md`](../../docs/MODEL_LAYOUT.md) for the GCS layout contract.
 
 ## NVIDIA MPS — when
 
@@ -88,11 +71,13 @@ REF: https://docs.cloud.google.com/dataflow/docs/gpu/troubleshoot-gpus
 |---|---|---|
 | Single image (launcher + workers) | `docker/Dockerfile` | ✅ |
 | Build context exclusions | `docker/.dockerignore` | ✅ |
+| Flex Template parameter schema | `docker/flex_template_metadata.json` | ✅ |
+| CI build + push workflow | `.github/workflows/1_build_python_beam.yaml` | ✅ |
+| CI flex-template deploy | `.github/workflows/2_deploy_flex_template_python_beam.yaml` | ✅ |
 | 1-row Dataflow probe (image already in JFrog) | `scripts/probe_gpu_dataflow.sh` | ✅ |
-| CI build workflow | `.github/workflows/1_build_python_beam.yaml` | ✅ |
 | Operational runbook | [`docs/CICD.md`](../../docs/CICD.md) | ✅ |
 
-Build/push scripts that used to live on the M4 (`build_gpu_image.sh`, `push_gpu_image.sh`) were retired per [ADR 0008](../../docs/adr/0008-ci-driven-builds.md). CI is the only image publisher.
+Per [ADR 0008](../../docs/adr/0008-ci-driven-builds.md), developers do not build images locally. The retired local-build scripts have been removed.
 
 ADRs: [`0003`](../../docs/adr/0003-jfrog-image-registry.md), [`0004`](../../docs/adr/0004-europe-west3-region.md), [`0008`](../../docs/adr/0008-ci-driven-builds.md), [`0009`](../../docs/adr/0009-single-flex-template-image.md).
 
@@ -108,3 +93,4 @@ ADRs: [`0003`](../../docs/adr/0003-jfrog-image-registry.md), [`0004`](../../docs
 - Troubleshooting: https://docs.cloud.google.com/dataflow/docs/gpu/troubleshoot-gpus
 - Tutorial: https://docs.cloud.google.com/dataflow/docs/tutorials/satellite-images-gpus
 - vLLM install: https://docs.vllm.ai/en/latest/getting_started/installation.html
+- Flex Templates with custom containers: https://cloud.google.com/dataflow/docs/guides/templates/configuring-flex-templates

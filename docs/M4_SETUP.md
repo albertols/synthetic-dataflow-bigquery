@@ -192,12 +192,13 @@ When you need information on a concern, go here — don't restate it elsewhere.
 
 ```
 packages/sdfb-core/               pure-Python contracts + ABC + codegen (laptop-installable)
-packages/sdfb-beam/               Beam pipeline + DoFns + DDL extractor
+packages/sdfb-beam/               Beam pipeline + DoFns + DDL extractor + handlers + CLI
 packages/sdfb-tests/              unit + integration tests
-docker/                           Dockerfile.gpu + .dockerignore
-scripts/                          build/push image, extract_ddl CLI shim
-config/                           thresholds.yml + models.yml (M1 §12 — TBD)
-docker/                           Dockerfile.gpu + entrypoint (M1 §10 — TBD)
+docker/                           Dockerfile + .dockerignore + flex_template_metadata.json
+scripts/                          extract_ddl, probe_gpu_dataflow, hello_synthetic_mlx
+config/                           thresholds.yml + models.yml
+composer/                         synthetic_beam_bigquery.py (Airflow DAG template)
+.github/workflows/                ci.yml + 1_build / 2_deploy / 3_import_dag
 ```
 
 When in doubt: `CLAUDE.md` + `memory/MEMORY.md` in the project memory directory carry the locked decisions from planning. Re-read them if anything ever feels ambiguous.

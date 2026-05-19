@@ -7,8 +7,9 @@ description: Subagent that owns the L4 GPU Docker image and the vLLM `ModelHandl
 
 ## Scope
 
-- Own `docker/Dockerfile.gpu`, `docker/entrypoint.sh`, `scripts/build_image.sh`, `scripts/push_image.sh`.
-- Own `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_handler.py` and `vllm_client.py`.
+- Own `docker/Dockerfile`, `docker/.dockerignore`, `docker/flex_template_metadata.json`.
+- Own the GitHub Actions workflows that build / deploy the image: `.github/workflows/1_build_python_beam.yaml` and `.github/workflows/2_deploy_flex_template_python_beam.yaml`. Build and push happen in CI per [ADR 0008](../../docs/adr/0008-ci-driven-builds.md); developers do not run `docker build` locally.
+- Own `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_client.py` (and any future `vllm_handler.py`).
 - Define and document the GCS model layout (`gs://{project}-models/{family}/{model}/{version}/`).
 - Wire NVIDIA driver install + L4 accelerator flags in the Dataflow launch scripts.
 - Pin Beam SDK, vLLM, torch, and CUDA versions; bump them only with explicit justification.

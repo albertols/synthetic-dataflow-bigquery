@@ -17,7 +17,7 @@ Single source of truth for milestone scope. Locked decisions per milestone live 
 | 7 | B.1 RAG engine | 🔒 pending | M4 |
 | 8 | Beam DAG end-to-end on DirectRunner + `FakeModelClient` | ✅ done | laptop |
 | 9 | vLLM `ModelHandler` + `ModelClient` | 🔒 pending | M4 |
-| 10 | `Dockerfile.gpu` + image build/push | 🟡 in progress | M4 |
+| 10 | `docker/Dockerfile` + CI workflows | ✅ done | CI |
 | 11 | E2E Dataflow run: Gemma 4 E4B → 26B-A4B MoE | 🔒 pending | M4 |
 | 12 | `thresholds.yml` wiring + `validation_runs` BQ table | 🔒 pending | M4 |
 

@@ -1,0 +1,26 @@
+# Doc-drift patterns — strings that MUST NOT appear in any tracked file
+# outside `docs/adr/` (where they are allowed for historical context).
+#
+# Add an entry whenever you delete or rename a file, symbol, or image tag
+# that the rest of the repo might still reference. CI enforces this on
+# every push.
+#
+# One literal pattern per line. Lines starting with `#` are comments.
+# Patterns are passed to `grep -F` (fixed-string), not regex.
+#
+# Maintenance: when an entry has been clean for ≥ 1 month after the last
+# stale reference was removed, it's safe to delete the entry from this
+# file too — the goal is to catch fresh drift, not maintain a memorial.
+
+# 2026-05-19 — single-image refactor (ADR 0008 + ADR 0009)
+Dockerfile.gpu
+GPU_CONTAINER.md
+build_gpu_image.sh
+push_gpu_image.sh
+build_image.sh
+push_image.sh
+
+# Image tag rename. Patterns are bounded by `:` and `/` to avoid
+# false positives on substrings like `sdfb-gpu-something`.
+sdfb-gpu:
+sdfb-gpu/
