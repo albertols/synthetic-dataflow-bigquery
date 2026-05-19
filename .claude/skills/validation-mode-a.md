@@ -77,6 +77,17 @@ Severity < BLOCKER does NOT fail Mode A. Those propagate to Mode B (M2) for CI g
 
 Anything GX / Soda / SDMetrics / Evidently is M2. Do not add it to Mode A files. If a request reaches for those, push back and confirm scope first.
 
+## Current implementation
+
+| Line of defense | File | Tests | Status |
+|---|---|---|---|
+| Per-record Pydantic | `packages/sdfb-beam/src/sdfb_beam/dofns/validate_record.py` | `tests/unit/dofns/test_validate_record.py` | ✅ |
+| Per-batch Pandera | `packages/sdfb-beam/src/sdfb_beam/dofns/pandera_batch.py` | `tests/unit/dofns/test_pandera_batch.py` | ✅ |
+| `WhylogsProfileDoFn` + `MergeProfilesFn` | — | — | 🔒 M1 §11 |
+| BigQueryIO `FailedRows` safety net | `packages/sdfb-beam/src/sdfb_beam/pipeline.py` | (DirectRunner uses JSONL sinks; real BQ wiring in M1 §11) | 🟡 partial |
+
+Thresholds — env-scoped severity gates per rule_id: `config/thresholds.yml`. Loaded at job start by `pipeline.build_pipeline()` (wiring in M1 §12).
+
 ## References
 
 - Pydantic v2: https://docs.pydantic.dev/latest/

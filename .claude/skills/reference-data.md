@@ -61,6 +61,15 @@ Non-deterministic across runs — two consecutive jobs may see different referen
 - **Debug repro** uses the digest as the lookup key. If a row generated yesterday looked different, check the digest first.
 - **CI determinism** uses a fixture instead of live SELECT (the `FakeModelClient` reads a frozen reference parquet for deterministic tests).
 
+## Current implementation
+
+| Concern | File | Tests |
+|---|---|---|
+| Driver-side BQ read (`SELECT … LIMIT N`) | `packages/sdfb-beam/src/sdfb_beam/io/bq_sources.py` | `tests/unit/io/test_bq_sources.py` |
+| Canonical SHA-256 digest | `packages/sdfb-beam/src/sdfb_beam/io/digest.py` | covered via pipeline integration test |
+
+ADR: [`docs/adr/0005-live-select-reference-data.md`](../../docs/adr/0005-live-select-reference-data.md).
+
 ## References
 
 - BigQueryIO Read: https://beam.apache.org/releases/pydoc/current/apache_beam.io.gcp.bigquery.html

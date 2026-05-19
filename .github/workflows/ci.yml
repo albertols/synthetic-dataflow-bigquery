@@ -1,0 +1,51 @@
+name: CI
+
+# Laptop-side gate: every push and PR runs the no-GPU / no-GCP test suite plus
+# lint and type checks. GPU and GCP tests (`@pytest.mark.gpu` /
+# `@pytest.mark.gcp`) are intentionally skipped here — they require real
+# Dataflow / L4 / BigQuery infrastructure (M1 §11).
+#
+# Triggers on push to main + every PR. Fail-fast: lint/type before tests.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync workspace
+        run: uv sync --group dev
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy (sdfb-core only — strict surface)
+        run: uv run mypy packages/sdfb-core/src
+        continue-on-error: true   # promote to hard-fail once type debt is paid
+
+      - name: Pytest (laptop-side suite)
+        run: uv run pytest -m "not gpu and not gcp" -q
+
+      - name: Pytest summary
+        if: always()
+        run: echo "Test job complete. See above for pass/fail and counts."

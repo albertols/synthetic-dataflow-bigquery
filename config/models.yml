@@ -1,0 +1,56 @@
+# Model registry for the synthesis pipeline.
+#
+# The `--model_uri` Dataflow flag picks one entry by key (e.g. `--model=gemma4_e4b`).
+# Worker `setup()` does `gsutil -m cp -r <uri>/ /local-ssd/model/` and vLLM loads
+# from there. See docs/MODEL_LAYOUT.md for the on-GCS file checklist.
+#
+# Single source of truth for: GCS URI, vLLM kwargs, expected GPU memory, license.
+# DO NOT recopy these values into scripts — read this file.
+
+defaults:
+  family: gemma4
+  max_model_len: 8192
+  gpu_memory_utilization: 0.85
+  enforce_eager: false
+
+models:
+  gemma4_e4b:
+    # M1 §11 first pass — fast iteration, fits anywhere.
+    description: Gemma 4 E4B Instruct (4.5B effective params, 128K context). Dev / cost-floor.
+    gcs_uri: "gs://{project}-models/gemma4/e4b/v1/"
+    quantization: null            # FP16
+    expected_vram_gb: 9
+    license: gemma-tos
+    source: kaggle
+    download_hint: |
+      kaggle models instances versions download google/gemma-4/transformers/e4b/1
+
+  gemma4_26b_a4b_awq:
+    # M1 §11 primary production target — MoE, Q4-AWQ for single-L4 fit.
+    description: Gemma 4 26B A4B MoE, Q4-AWQ. Activates ~3.8B/token. Primary production.
+    gcs_uri: "gs://{project}-models/gemma4/26b-a4b-awq/v1/"
+    quantization: awq
+    expected_vram_gb: 16
+    license: gemma-tos
+    source: kaggle
+    download_hint: |
+      kaggle models instances versions download google/gemma-4/transformers/26b-a4b-awq/1
+
+  qwen2_5_7b_it:
+    # Optional cross-family comparison. Not in M1 critical path.
+    description: Qwen 2.5 7B Instruct, 128K context. Apache-2.0 fallback.
+    gcs_uri: "gs://{project}-models/qwen2.5/7b-it/v1/"
+    quantization: null
+    expected_vram_gb: 14
+    license: apache-2.0
+    source: qwen-github
+    download_hint: |
+      Pull tarball from https://github.com/QwenLM/Qwen2.5/releases
+
+# Embedding models for B.1 RAG (M1 §7).
+embedders:
+  bge_small_en_v1_5:
+    description: BAAI/bge-small-en-v1.5 — small, fast, OK quality. Mirrored to GCS.
+    gcs_uri: "gs://{project}-models/embedders/bge-small-en-v1.5/v1/"
+    dim: 384
+    license: mit

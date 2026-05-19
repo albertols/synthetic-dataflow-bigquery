@@ -92,6 +92,17 @@ For every DoFn:
 
 Mark integration tests `@pytest.mark.integration`. They run with `DirectRunner` on the laptop.
 
+## Current implementation
+
+| DoFn | File | Tests |
+|---|---|---|
+| `GenerateRecordsDoFn` | `packages/sdfb-beam/src/sdfb_beam/dofns/generate.py` | covered via integration test |
+| `ValidateRecordDoFn` | `packages/sdfb-beam/src/sdfb_beam/dofns/validate_record.py` | `tests/unit/dofns/test_validate_record.py` |
+| `PanderaValidateBatchDoFn` | `packages/sdfb-beam/src/sdfb_beam/dofns/pandera_batch.py` | `tests/unit/dofns/test_pandera_batch.py` |
+| `WhylogsProfileDoFn` + `MergeProfilesFn` | TBD | 🔒 deferred to M1 §11 |
+
+Pipeline composition: `packages/sdfb-beam/src/sdfb_beam/pipeline.py`. End-to-end DirectRunner test: `packages/sdfb-tests/tests/integration/test_pipeline_end_to_end.py`.
+
 ## References
 
 - Beam programming guide: https://beam.apache.org/documentation/programming-guide/

@@ -82,6 +82,18 @@ For other GPU job issues:
 
 REF: https://docs.cloud.google.com/dataflow/docs/gpu/troubleshoot-gpus
 
+## Current implementation
+
+| Concern | File | Status |
+|---|---|---|
+| GPU image definition | `docker/Dockerfile.gpu` | ✅ written, build pending on M4 |
+| Build context exclusions | `docker/.dockerignore` | ✅ |
+| Build / push wrappers | `scripts/build_gpu_image.sh`, `scripts/push_gpu_image.sh` | ✅ |
+| 1-row Dataflow probe | `scripts/probe_gpu_dataflow.sh` | ✅ |
+| Operational runbook | [`docs/GPU_CONTAINER.md`](../../docs/GPU_CONTAINER.md) | ✅ |
+
+ADRs: [`0003-jfrog-image-registry.md`](../../docs/adr/0003-jfrog-image-registry.md), [`0004-europe-west3-region.md`](../../docs/adr/0004-europe-west3-region.md).
+
 ## References
 
 - Overview: https://docs.cloud.google.com/dataflow/docs/gpu

@@ -52,6 +52,19 @@ These tests run on the laptop with `FakeModelClient`. No GPU, no GCP.
 - The new engine genuinely produces records by a different mechanism (e.g., diffusion-based tabular synthesis, GAN-only).
 - A flag on an existing engine is sufficient ⇒ do NOT add a new engine, add the flag to `GenerationConfig.engine_specific`.
 
+## Current implementation
+
+| Concern | File | Status |
+|---|---|---|
+| ABC + types + registry | `packages/sdfb-core/src/sdfb_core/engines/base.py` | ✅ done |
+| `ENGINE_REGISTRY` / `register_engine` / `get_engine` | `packages/sdfb-core/src/sdfb_core/engines/__init__.py` | ✅ done |
+| Contract tests (5 + protocol sanity) | `packages/sdfb-tests/tests/unit/engines/test_abc_contract.py` | ✅ done |
+| `MinimalEngine` test driver | `packages/sdfb-tests/src/sdfb_tests/fakes.py` | ✅ done |
+| `B2LibraryEngine` (B.2) | `packages/sdfb-core/src/sdfb_core/engines/b2_library/` | 🔒 worktree, M1 §6 |
+| `B1RagEngine` (B.1) | `packages/sdfb-core/src/sdfb_core/engines/b1_rag/` | 🔒 worktree, M1 §7 |
+
+ADR: [`docs/adr/0006-generation-engine-abc.md`](../../docs/adr/0006-generation-engine-abc.md).
+
 ## References
 
 - ABC: `packages/sdfb-core/src/sdfb_core/engines/base.py`

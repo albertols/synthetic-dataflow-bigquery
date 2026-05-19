@@ -12,7 +12,10 @@
       "Bash(.venv/bin/python -c \"import apache_beam; print\\(apache_beam.__version__\\)\")",
       "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests -v --tb=short)",
       "Bash(.venv/bin/python -c \"from google.cloud import bigquery; print\\('bq', bigquery.__version__\\)\")",
-      "Bash(chmod +x *)"
+      "Bash(chmod +x *)",
+      "Bash(git fetch *)",
+      "Bash(.venv/bin/python -m pytest --collect-only -q)",
+      "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests -q --tb=short)"
     ]
   }
 }

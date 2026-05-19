@@ -68,10 +68,23 @@ In `packages/sdfb-tests/tests/unit/codegen/`:
 
 The Pydantic model is the source of truth at code-generation time. The `_ddl.json` is the source of truth at runtime for *which tables exist*, but the Pydantic model is regenerated from it. Never hand-edit the derived Pandera or BQ DDL.
 
+## Current implementation
+
+| Concern | File | Tests |
+|---|---|---|
+| `TableSchema` / `FieldSchema` Pydantic models | `packages/sdfb-core/src/sdfb_core/contracts/schema.py` | `tests/unit/codegen/test_schema_validation.py` |
+| `GeneratedRecord` marker base | `packages/sdfb-core/src/sdfb_core/contracts/record.py` | `tests/unit/codegen/test_derive_pydantic.py` |
+| BQ ↔ Python type map | `packages/sdfb-core/src/sdfb_core/codegen/types.py` | — |
+| `derive_record_model()` | `packages/sdfb-core/src/sdfb_core/codegen/derive_pydantic.py` | `tests/unit/codegen/test_derive_pydantic.py` |
+| `derive_bq_schema()` | `packages/sdfb-core/src/sdfb_core/codegen/derive_bq_ddl.py` | `tests/unit/codegen/test_derive_bq_ddl.py`, `test_round_trip.py` |
+| `derive_pandera_schema()` | `packages/sdfb-beam/src/sdfb_beam/codegen/derive_pandera.py` | `tests/unit/codegen/test_derive_pandera.py` |
+| DDL extractor (BQ → `_ddl.json`) | `packages/sdfb-beam/src/sdfb_beam/ddl/` | `tests/unit/ddl/test_extractor.py` |
+
+Property test wiring the chain together: `tests/unit/codegen/test_property_pydantic.py` (hypothesis-generated records pass the derived Pydantic model on `customers` and `orders` fixtures).
+
 ## References
 
 - BigQuery JSON schema file: https://docs.cloud.google.com/bigquery/docs/schemas#creating_a_JSON_schema_file
 - BigQuery PK/FK: https://docs.cloud.google.com/bigquery/docs/primary-foreign-keys
 - Pydantic v2 dynamic models: https://docs.pydantic.dev/latest/concepts/models/#dynamic-model-creation
 - Pandera DataFrameSchema: https://pandera.readthedocs.io/en/stable/
-- `bigquery_ddl_metadata.py` (root of repo, to be refactored into `sdfb_core/ddl/`)

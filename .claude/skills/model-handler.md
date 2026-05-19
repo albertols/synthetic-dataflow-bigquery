@@ -75,6 +75,17 @@ Don't reach for the fallback unless you've reproduced the failure with a fixture
 
 REF: https://docs.cloud.google.com/dataflow/docs/gpu/gpu-metrics
 
+## Current implementation
+
+| Concern | File | Status |
+|---|---|---|
+| `ModelClient` Protocol | `packages/sdfb-core/src/sdfb_core/engines/base.py` | ✅ done |
+| `FakeModelClient` (canned + echo modes) | `packages/sdfb-beam/src/sdfb_beam/handlers/fake_client.py` | ✅ done |
+| `FakeModelClient` tests | `packages/sdfb-tests/tests/unit/handlers/test_fake_client.py` | ✅ done |
+| `VLLMModelClient` + `VLLMModelHandler` | `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_*.py` | 🔒 M1 §9 |
+
+Model registry (GCS URIs, vLLM args, license): `config/models.yml`. Layout / download procedure: [`docs/MODEL_LAYOUT.md`](../../docs/MODEL_LAYOUT.md).
+
 ## References
 
 - vLLM structured outputs: https://docs.vllm.ai/en/latest/usage/structured_outputs.html

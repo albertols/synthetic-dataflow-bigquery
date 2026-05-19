@@ -23,6 +23,16 @@ Locked rationale: `~/.claude/projects/-Users-serna-IdeaProjects-synthetic-datafl
 
 Mark M4-only tests with `@pytest.mark.gpu` or `@pytest.mark.gcp`. The default `pytest` run excludes them.
 
+## Verify workspace health
+
+```bash
+uv sync --group dev
+uv run pytest -m "not gpu and not gcp" -q   # expect "73 passed"
+uv run ruff check .
+```
+
+Full machine setup: [`docs/M4_SETUP.md`](docs/M4_SETUP.md).
+
 ## Package map
 
 ```
@@ -34,6 +44,13 @@ packages/sdfb-tests/   imports both; pytest + hypothesis + DirectRunner fixtures
 ```
 
 Import direction is **strict**: `sdfb-beam` depends on `sdfb-core`, never the other way. Engines live in `sdfb-core` (pure-Python); only the DoFn wrappers and ModelHandler live in `sdfb-beam`.
+
+## Entry points
+
+- `packages/sdfb-core/src/sdfb_core/engines/base.py` — `GenerationEngine` ABC + `ModelClient` Protocol (the seam).
+- `packages/sdfb-beam/src/sdfb_beam/pipeline.py` — `build_pipeline()` composer.
+- `packages/sdfb-beam/src/sdfb_beam/ddl/cli.py` — DDL extractor CLI.
+- `scripts/extract_ddl.py`, `scripts/build_gpu_image.sh`, `scripts/probe_gpu_dataflow.sh` — runnable entry shims.
 
 ## What lives where in `.claude/`
 
@@ -53,22 +70,15 @@ Import direction is **strict**: `sdfb-beam` depends on `sdfb-core`, never the ot
 - `b2-library-engineer` — owns `worktrees/b2-library`
 - `gpu-image-builder` — owns `docker/Dockerfile.gpu` and the vLLM handler
 
-## Critical path (M1 §9)
+## Critical path
 
-1. Bootstrap (this commit)                              — laptop
-2. Contracts (Pydantic → Pandera + BQ DDL codegen)      — laptop
-3. DDL refactor (`bigquery_ddl_metadata.py` → core)     — laptop
-4. Fake model client + fixtures                          — laptop
-5. Engine ABC + tests                                    — laptop
-6. B.2 engine (worktree)                                 — M4 (library fit timing)
-7. B.1 engine (worktree)                                 — M4 (FAISS perf)
-8. Beam DAG (DirectRunner with FakeModelClient)         — laptop
-9. vLLM `ModelHandler`                                   — M4
-10. `Dockerfile.gpu` + entrypoint + image push          — M4
-11. End-to-end on Dataflow with Gemma 4 E4B then 26B-MoE — M4
-12. Threshold tuning + `validation_runs` metadata table  — M4
+Full milestone table: [`docs/ROADMAP.md`](docs/ROADMAP.md). Snapshot of M1:
 
-§1–§5 + §8 parallelize on the laptop. §6, §7, §9–§12 require the M4.
+- ✅ §1 Bootstrap · ✅ §2 Contracts · ✅ §3 DDL extractor · ✅ §4 Fake client · ✅ §5 Engine ABC · ✅ §8 Beam DAG
+- 🟡 §10 `Dockerfile.gpu` (in progress on M4)
+- 🔒 §6 B.2 engine · §7 B.1 engine · §9 vLLM handler · §11 E2E Dataflow · §12 thresholds + validation_runs
+
+The laptop side of M1 is done; the rest needs M4 + GCP. See [`docs/M4_SETUP.md`](docs/M4_SETUP.md) for onboarding.
 
 ## Anti-patterns — do not do these
 
@@ -81,4 +91,6 @@ Import direction is **strict**: `sdfb-beam` depends on `sdfb-core`, never the ot
 
 ## When in doubt
 
-Re-read `memory/MEMORY.md` (in the project memory directory). It indexes the two locked decision memos from planning.
+- **What was decided and why** → [`docs/adr/`](docs/adr/) (durable ADRs).
+- **What's the current scope and what's deferred** → [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **Cross-session preferences and project context** → `~/.claude/projects/.../memory/MEMORY.md`.
