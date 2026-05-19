@@ -68,7 +68,7 @@ Import direction is **strict**: `sdfb-beam` depends on `sdfb-core`, never the ot
 - `beam-pipeline-author` — DAG composition (does not write DoFns from scratch)
 - `b1-rag-engineer` — owns `worktrees/b1-rag`
 - `b2-library-engineer` — owns `worktrees/b2-library`
-- `gpu-image-builder` — owns `docker/Dockerfile.gpu` and the vLLM handler
+- `gpu-image-builder` — owns `docker/Dockerfile` + the vLLM handler (build itself happens in CI, see ADR 0008)
 
 ## Critical path
 

@@ -16,7 +16,9 @@
       "Bash(git fetch *)",
       "Bash(.venv/bin/python -m pytest --collect-only -q)",
       "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests -q --tb=short)",
-      "Bash(~/.local/bin/uv lock *)"
+      "Bash(~/.local/bin/uv lock *)",
+      "Bash(git rm *)",
+      "Bash(~/.local/bin/uv export *)"
     ]
   }
 }

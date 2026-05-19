@@ -86,13 +86,15 @@ REF: https://docs.cloud.google.com/dataflow/docs/gpu/troubleshoot-gpus
 
 | Concern | File | Status |
 |---|---|---|
-| GPU image definition | `docker/Dockerfile.gpu` | ✅ written, build pending on M4 |
+| Single image (launcher + workers) | `docker/Dockerfile` | ✅ |
 | Build context exclusions | `docker/.dockerignore` | ✅ |
-| Build / push wrappers | `scripts/build_gpu_image.sh`, `scripts/push_gpu_image.sh` | ✅ |
-| 1-row Dataflow probe | `scripts/probe_gpu_dataflow.sh` | ✅ |
-| Operational runbook | [`docs/GPU_CONTAINER.md`](../../docs/GPU_CONTAINER.md) | ✅ |
+| 1-row Dataflow probe (image already in JFrog) | `scripts/probe_gpu_dataflow.sh` | ✅ |
+| CI build workflow | `.github/workflows/1_build_python_beam.yaml` | ✅ |
+| Operational runbook | [`docs/CICD.md`](../../docs/CICD.md) | ✅ |
 
-ADRs: [`0003-jfrog-image-registry.md`](../../docs/adr/0003-jfrog-image-registry.md), [`0004-europe-west3-region.md`](../../docs/adr/0004-europe-west3-region.md).
+Build/push scripts that used to live on the M4 (`build_gpu_image.sh`, `push_gpu_image.sh`) were retired per [ADR 0008](../../docs/adr/0008-ci-driven-builds.md). CI is the only image publisher.
+
+ADRs: [`0003`](../../docs/adr/0003-jfrog-image-registry.md), [`0004`](../../docs/adr/0004-europe-west3-region.md), [`0008`](../../docs/adr/0008-ci-driven-builds.md), [`0009`](../../docs/adr/0009-single-flex-template-image.md).
 
 ## References
 

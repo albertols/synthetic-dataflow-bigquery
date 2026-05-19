@@ -40,3 +40,6 @@ Keep ADRs tight — half a page is plenty. Detail belongs in the code or in skil
 - [0005 — Live BQ SELECT for reference rows, not cached parquet](0005-live-select-reference-data.md)
 - [0006 — `GenerationEngine` ABC + `ModelClient` Protocol shape](0006-generation-engine-abc.md)
 - [0007 — DRY across documentation and code](0007-dry-documentation-policy.md)
+- [0008 — Container image builds happen in CI, not on developer laptops](0008-ci-driven-builds.md)
+- [0009 — Single image for Flex Template launcher AND Dataflow workers](0009-single-flex-template-image.md)
+- [0010 — M4 local smoke test via MLX (no DirectRunner-with-Docker)](0010-m4-local-smoke-mlx.md)

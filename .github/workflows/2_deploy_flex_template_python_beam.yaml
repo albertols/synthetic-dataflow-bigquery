@@ -1,0 +1,113 @@
+name: 2 - Deploy Python Beam Flex Template
+
+# Publishes the Flex Template JSON pointing at an existing sdfb-python image
+# (built by workflow 1). See docs/CICD.md §4.
+on:
+  workflow_dispatch:
+    inputs:
+      BUILD_TYPE:
+        type: choice
+        options: [Development, Release]
+        default: Development
+      override_image_tag:
+        type: string
+        required: false
+        description: "Pin a specific image tag (default: latest Development tag from current branch)"
+      servicenow-implementation-task:
+        type: string
+        required: false
+
+env:
+  ARTIFACTORY_HOSTNAME: "<ARTIFACTORY_HOSTNAME>"
+  ARTIFACTORY_NAMESPACE: "<ARTIFACTORY_NAMESPACE>"
+  IMAGE_NAME: "sdfb-python"
+  PROJECT_BUCKET_SUFFIX: "<PROJECT_BUCKET_SUFFIX>"
+  REGION: "europe-west3"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  sdlc-unlock-prod:
+    if: ${{ github.ref == 'refs/heads/RELEASE_dbc_prd' }}
+    uses: <SDLC_ORG>/sdlc-workflows/.github/workflows/sdlc_deployment_workflow.yml@main
+    with:
+      ITSK: ${{ inputs.servicenow-implementation-task }}
+      ENVIRONMENT: PRD
+      GOOGLE_DEPLOYMENT_SERVICE_ACCOUNT: "<PROD_DEPLOY_SA>"
+      DEPLOYMENT_TYPE: DATAFLOW
+    secrets:
+      GOOGLE_PIPELINE_SERVICE_ACCOUNT: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['prd/sdlc-ro-sa'] }}
+
+  deploy:
+    needs: [sdlc-unlock-prod]
+    if: ${{ always() && (needs.sdlc-unlock-prod.result == 'skipped' || needs.sdlc-unlock-prod.result == 'success') }}
+    runs-on:
+      group: >-
+        ${{
+          github.ref_name == 'RELEASE_dbc_dev' && 'DEV' ||
+          github.ref_name == 'RELEASE_dbc_uat' && 'UAT' ||
+          github.ref_name == 'RELEASE_dbc_prd' && 'PRD' ||
+          'DEV'
+        }}
+      labels:
+        - <RUNNER_LABEL>
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Map branch → env
+        id: env
+        run: |
+          case "${GITHUB_REF##*/}" in
+            RELEASE_dbc_dev) ENV_NAME=dev; KEYS_PROJECT=<KEYS_PROJECT_ID_DEV>; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
+            RELEASE_dbc_uat) ENV_NAME=uat; KEYS_PROJECT=<KEYS_PROJECT_ID_UAT>; SERVICE_ACCOUNT_STRING=uat/lz-deploy ;;
+            RELEASE_dbc_prd) ENV_NAME=prd; KEYS_PROJECT=<KEYS_PROJECT_ID_PRD>; SERVICE_ACCOUNT_STRING=prd/lz-deploy ;;
+            *)               ENV_NAME=dev; KEYS_PROJECT=<KEYS_PROJECT_ID_DEV>; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
+          esac
+          GOOGLE_PROJECT_DBC="${{ secrets[format('GOOGLE_PROJECT_DBC_{0}', '$ENV_NAME')] }}"
+          {
+            echo "ENV_NAME=$ENV_NAME"
+            echo "KEYS_PROJECT=$KEYS_PROJECT"
+            echo "GOOGLE_PROJECT_DBC=$GOOGLE_PROJECT_DBC"
+            echo "SERVICE_ACCOUNT_STRING=$SERVICE_ACCOUNT_STRING"
+          } >> $GITHUB_OUTPUT
+          echo "ENV_NAME=$ENV_NAME" >> $GITHUB_ENV
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.env.outputs.SERVICE_ACCOUNT_STRING] }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve RELEASE_VERSION
+        run: |
+          if [[ -n "${{ inputs.override_image_tag }}" ]]; then
+            echo "RELEASE_VERSION=${{ inputs.override_image_tag }}" >> $GITHUB_ENV
+          elif [[ "${{ inputs.BUILD_TYPE }}" == "Release" ]]; then
+            VER=$(grep -m1 '^version' packages/sdfb-beam/pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
+            echo "RELEASE_VERSION=$VER" >> $GITHUB_ENV
+          else
+            BR="${GITHUB_REF#refs/*/}"
+            BR="${BR//\//-}"
+            SHA=$(git rev-parse --short HEAD)
+            echo "RELEASE_VERSION=${BR}-${SHA}" >> $GITHUB_ENV
+          fi
+
+      - name: gcloud dataflow flex-template build
+        env:
+          PROJECT_ID: ${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}
+        run: |
+          DF_TEMPLATE_PATH="gs://<BUCKET_PREFIX>-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-templates/synthetic/sdfb-${RELEASE_VERSION}-template.json"
+          IMG="$ARTIFACTORY_HOSTNAME/dkr-public-local/$ARTIFACTORY_NAMESPACE/$IMAGE_NAME:${RELEASE_VERSION}"
+          gcloud dataflow flex-template build "$DF_TEMPLATE_PATH" \
+            --image="$IMG" \
+            --image-repository-username-secret-id="projects/${PROJECT_ID}/secrets/ARTIFACTORY_RELEASER_USERNAME" \
+            --image-repository-password-secret-id="projects/${PROJECT_ID}/secrets/ARTIFACTORY_RELEASER_PASSWORD" \
+            --sdk-language=PYTHON \
+            --metadata-file=docker/flex_template_metadata.json \
+            --staging-location="gs://<BUCKET_PREFIX>-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/staging" \
+            --temp-location="gs://<BUCKET_PREFIX>-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/temp" \
+            --dataflow-kms-key="projects/${{ steps.env.outputs.KEYS_PROJECT }}/locations/${REGION}/keyRings/gcp_dataflow/cryptoKeys/<DATAFLOW_EKM_KEY>"
+          echo "Template published: $DF_TEMPLATE_PATH"

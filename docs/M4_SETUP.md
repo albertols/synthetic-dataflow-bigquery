@@ -161,11 +161,13 @@ Output lands in `./output/<dataset>/ddl_metadata_<dataset>_<table>.json`.
 
 Paste back the `head -50` of the file (or the full JSON if small). If `TableSchema.model_validate()` accepts it cleanly on the M4, the whole DDL extractor chain is verified against real BigQuery — not just mocked clients.
 
-### Step B — #10 (`Dockerfile.gpu`)
+### Step B — #10 (image) + #14 (CI workflows)
 
-GPU container is the longest pole on the M1 critical path — once it builds and a 1-row probe job succeeds on a real L4 worker, every other M4 task gets faster to iterate. Full runbook: **[`GPU_CONTAINER.md`](GPU_CONTAINER.md)**. Covers preflight (uv.lock, quota, Docker), build / push / probe, what-to-send-back, and the GPU-specific gotchas.
+Per [ADR 0008](adr/0008-ci-driven-builds.md), image build/push/deploy happen in GitHub Actions, not on the M4. Full runbook: **[`CICD.md`](CICD.md)**. Covers the 3 workflows + DAG + secrets + Flex Template metadata. The M4's role here is `gh workflow run …` and observing the resulting Dataflow runs.
 
-**#6 (sdgx vs DataDreamer bake-off)** is technically laptop-doable, but realistic fit timing needs the M4. Interleave after #10 if you want.
+For real-LLM iteration on the M4 without burning Dataflow time, see **[`M4_LOCAL_SMOKE.md`](M4_LOCAL_SMOKE.md)** — the MLX-based smoke loop (#15).
+
+**#6 (sdgx vs DataDreamer bake-off)** can use the MLX loop for fast fidelity-check iteration before any Dataflow run.
 
 ### Step C — #9 (vLLM `ModelHandler`)
 
@@ -179,7 +181,8 @@ After #9 + #10 are stable. This is the M1 finish line.
 
 When you need information on a concern, go here — don't restate it elsewhere.
 
-- **Building / pushing / probing the GPU image; L4 quota; region flags** → [`GPU_CONTAINER.md`](GPU_CONTAINER.md)
+- **CI/CD pipeline** (image build, Flex Template deploy, DAG import); L4 quota; region flags → [`CICD.md`](CICD.md)
+- **Local smoke test on M4 with a real model** (no Dataflow) → [`M4_LOCAL_SMOKE.md`](M4_LOCAL_SMOKE.md)
 - **Model weights** — GCS layout, Kaggle download, runtime load, Apple-Silicon caveat → [`MODEL_LAYOUT.md`](MODEL_LAYOUT.md)
 - **Locked architecture decisions**, package contract, hard constraints → [`../CLAUDE.md`](../CLAUDE.md)
 - **Recipe cards** (DoFn lifecycle, model handler, Mode A validation, …) → `../.claude/skills/*.md`

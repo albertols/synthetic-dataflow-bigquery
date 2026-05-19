@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# 1-row Dataflow GPU probe — confirms the L4 worker boots from the image we
-# pushed and a single Beam bundle runs to completion.
+# 1-row Dataflow GPU probe — confirms an L4 worker boots from the
+# CI-published image and a single Beam bundle runs to completion.
+#
+# IMPORTANT: this script does NOT build anything. The image must already
+# be pushed to JFrog by `.github/workflows/1_build_python_beam.yaml`
+# (see ADR-0008). The script just submits a Dataflow job pointing at the
+# existing image.
 #
 # Acceptance gate for M1 §10 (see .claude/agents/gpu-image-builder.md):
 #   1. Image pulls without auth errors.
@@ -8,8 +13,8 @@
 #   3. GPU metric is non-zero in Cloud Monitoring.
 #   4. Cold start < 3 min.
 #
-# Required env (typically from .envrc):
-#   ARTIFACTORY_HOSTNAME, ARTIFACTORY_NAMESPACE,  GCP_REGION, GCP_ZONE
+# Required env (typically from .envrc on the M4):
+#   ARTIFACTORY_HOSTNAME, ARTIFACTORY_NAMESPACE, GCP_REGION, GCP_ZONE
 #
 # Usage:
 #   ./scripts/probe_gpu_dataflow.sh                # tag = current short SHA
@@ -23,8 +28,8 @@ set -euo pipefail
 
 VERSION="${1:-$(git rev-parse --short HEAD)}"
 PROJECT="$(gcloud config get-value project)"
-JOB_NAME="sdfb-gpu-probe-$(date +%s)"
-IMAGE="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/sdfb-gpu:${VERSION}"
+JOB_NAME="sdfb-probe-$(date +%s)"
+IMAGE="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/sdfb-python:${VERSION}"
 
 echo "==> Probe target"
 echo "    Project: ${PROJECT}"
@@ -33,11 +38,11 @@ echo "    Zone:    ${GCP_ZONE}"
 echo "    Image:   ${IMAGE}"
 echo "    Job:     ${JOB_NAME}"
 
-# Verify both Secret Manager entries exist; either is fatal for image pull.
-for secret in ARTIFACTORY_RELEASER_USER ARTIFACTORY_RELEASER_PS; do
+# Verify both Secret Manager entries exist; either missing is fatal for image pull.
+for secret in ARTIFACTORY_RELEASER_USERNAME ARTIFACTORY_RELEASER_PASSWORD; do
     if ! gcloud secrets describe "${secret}" --project="${PROJECT}" >/dev/null 2>&1; then
         echo "ERROR: Secret ${secret} missing in project ${PROJECT}." >&2
-        echo "       Create with:  gcloud secrets create ${secret} --data-file=-" >&2
+        echo "       Bank pattern is to manage these via GSM; ask platform team." >&2
         exit 1
     fi
 done
@@ -67,8 +72,8 @@ options = PipelineOptions([
     "--job_name=${JOB_NAME}",
     "--num_workers=1",
     "--max_num_workers=1",
-    "--image-repository-username-secret-id=projects/${PROJECT}/secrets/ARTIFACTORY_RELEASER_USER",
-    "--image-repository-password-secret-id=projects/${PROJECT}/secrets/ARTIFACTORY_RELEASER_PS",
+    "--image-repository-username-secret-id=projects/${PROJECT}/secrets/ARTIFACTORY_RELEASER_USERNAME",
+    "--image-repository-password-secret-id=projects/${PROJECT}/secrets/ARTIFACTORY_RELEASER_PASSWORD",
 ])
 
 with beam.Pipeline(options=options) as p:

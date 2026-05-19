@@ -8,7 +8,7 @@
 .envrc.example
 .direnv
 
-# Tests (not needed on workers; pinned via --no-dev anyway)
+# Tests (not needed on workers; we install --no-dev anyway)
 packages/sdfb-tests
 
 # Local artifacts

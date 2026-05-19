@@ -36,6 +36,13 @@ embedding = [
 library = [
     "sdgx>=0.2.0",  # hitsz-ids/synthetic-data-generator; revisit vs DataDreamer
 ]
+# Apple Silicon local smoke test backend — see docs/M4_LOCAL_SMOKE.md.
+# Installed ONLY on the M4; NEVER baked into the GPU image (would conflict
+# with vllm + torch on linux/amd64).
+mlx = [
+    "mlx>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
 
 [build-system]
 requires = ["hatchling"]

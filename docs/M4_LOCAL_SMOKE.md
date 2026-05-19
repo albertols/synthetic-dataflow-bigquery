@@ -1,0 +1,115 @@
+# M4 local smoke test — MLX backend
+
+Fast iteration loop on the M4 against a **real** LLM, no Dataflow time, no GPU image. See [ADR 0010](adr/0010-m4-local-smoke-mlx.md) for why MLX (not vLLM) on Apple Silicon.
+
+## TL;DR
+
+```bash
+# one-time per machine
+uv sync --extra mlx                 # installs mlx + mlx-lm on Apple Silicon
+mkdir -p models/gemma4/e4b/v1       # see MODEL_LAYOUT.md for the Kaggle download
+
+# smoke test — uses your real _ddl.json
+uv run python scripts/hello_synthetic_mlx.py \
+    --ddl_path output/CDH_dataset/ddl_metadata_CDH_dataset_KW860T_RR.json \
+    --reference_table cdh_dataset.synthetic_data \
+    --reference_limit 5 \
+    --num_rows 10 \
+    --model_path ./models/gemma4/e4b/v1/
+```
+
+Output: `output/<table>/hello_synthetic_mlx.jsonl` — one valid synthetic row per line.
+
+## Three layers of local validation
+
+The M4 supports a **3-layer ladder** of progressively-richer smoke tests; pick the one your iteration needs.
+
+### L1 — pure-Python tests (no LLM)
+
+```bash
+uv run pytest -m "not gpu and not gcp" -q   # 80 tests, ~20s
+```
+
+Validates: contracts, codegen, engine ABC, DoFn behavior, BQ source mock, fake-client deterministic outputs. Catches structural regressions instantly. **Always run before pushing.**
+
+### L2 — `hello_synthetic_mlx.py` (real LLM, no Beam)
+
+```bash
+uv run python scripts/hello_synthetic_mlx.py …
+```
+
+Validates: real LLM output is parseable as JSON, conforms to the derived Pydantic model, and survives Pandera column constraints. Catches prompt-engineering and schema-derivation bugs that L1 can't see.
+
+Cost: ~30s model load + ~1–2s per row (on M4 24GB w/ Gemma 4 E4B).
+
+### L3 — full DirectRunner + MLX through the pipeline
+
+```bash
+uv run python -m sdfb_beam.cli.run_pipeline \
+    --runner DirectRunner \
+    --client_type mlx \
+    --ddl_uri output/CDH_dataset/ddl_metadata_CDH_dataset_KW860T_RR.json \
+    --reference_table cdh_dataset.synthetic_data \
+    --landing_table /tmp/sdfb_landing \
+    --dlq_table /tmp/sdfb_dlq \
+    --num_rows 20 \
+    --batch_size 4 \
+    --run_id m4-smoke-001 \
+    --engine b1_rag \
+    --model_uri ./models/gemma4/e4b/v1/
+```
+
+Validates: end-to-end DAG including generation DoFn, ValidateRecordDoFn, PanderaValidateBatchDoFn, DLQ routing — but with a real LLM instead of the FakeModelClient. The only thing missing vs production: vLLM (CUDA-only), L4 GPU, BigQuery sinks (would need a real BQ table).
+
+**Note**: B.1 RAG and B.2 library engines don't exist yet; once they land in their worktrees, this layer becomes meaningful.
+
+## What this does NOT validate
+
+- The GPU image — only CI builds + the Dataflow probe can prove that.
+- Throughput / cost — single-process MLX is much slower than batched vLLM.
+- Production fidelity — E4B (4.5B effective) is significantly smaller than the 26B-A4B MoE production target.
+- BigQuery sinks — `WriteToBigQuery` requires real credentials + a real table.
+
+## Setup
+
+### 1. Install MLX extras
+
+```bash
+uv sync --extra mlx
+```
+
+The `[mlx]` extra in `packages/sdfb-beam/pyproject.toml` carries `sys_platform == 'darwin' and platform_machine == 'arm64'` markers, so it's a no-op on Linux/x86 (CI runners) and only installs on Apple Silicon.
+
+### 2. Get Gemma 4 E4B weights
+
+Follow [`MODEL_LAYOUT.md`](MODEL_LAYOUT.md) § "How to download" — pull from Kaggle, extract to `models/gemma4/e4b/v1/`. MLX reads the HF-layout safetensors directly.
+
+### 3. Verify MLX can see the model
+
+```bash
+uv run python -c "
+from mlx_lm import load
+model, tok = load('./models/gemma4/e4b/v1/')
+print('OK', type(model).__name__, type(tok).__name__)
+"
+```
+
+If this errors with `safetensors index missing`, the download didn't include `model.safetensors.index.json` — re-download or pull only the single-shard variant.
+
+## Gotchas
+
+- **First run downloads tokenizer pieces** if `tokenizer.json` isn't bundled — usually it is for Gemma 4 from Kaggle.
+- **MLX has no token-level guided JSON** (vLLM does). We rely on Gemma 4's native function-calling training + JSON-schema-in-prompt + post-validate. Expected schema conformance ≈ 80–90% on E4B; the script's repair loop tolerates this.
+- **Memory**: E4B FP16 is ~9 GB. On M4 24 GB you have headroom; on M4 16 GB you may need Q4 weights.
+- **No batching**: `MLXModelClient.generate_json(n=k)` calls `mlx_lm.generate` `k` times serially. For real benchmarks, you want vLLM on Dataflow.
+- **Drift from production**: this loop tests the engine + validation chain, NOT the GPU image. After a successful smoke, you still need to push and run on Dataflow before declaring victory.
+
+## When to use which layer
+
+| Want to test | Use |
+|---|---|
+| Code change in `sdfb_core` (contracts, codegen, ABC) | L1 |
+| Prompt engineering changes | L2 |
+| End-to-end engine + validation chain | L3 |
+| GPU image / Dataflow / vLLM / L4 | CI workflow 1 + probe |
+| Production fidelity / throughput / cost | Dataflow probe with real model (M1 §11) |
