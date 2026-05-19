@@ -5,38 +5,66 @@ description: Recipe for the vLLM-backed `ModelHandler` and `ModelClient` Protoco
 
 # Skill — `ModelHandler` + `ModelClient`
 
-The engines never import `vllm`. They call `ModelClient.generate_json(prompt, json_schema)`. The mapping from there to vLLM goes:
+The engines never import `vllm`. They call `ModelClient.generate_json(prompt, json_schema)`. We use **Beam's native `VLLMCompletionsModelHandler`** (shipped since `apache-beam` 2.60.0) — see [ADR 0011](../../docs/adr/0011-adopt-beam-vllm-model-handler.md) for why we don't write our own.
 
 ```
 engine.generate_batch(n)
-    └─> model_client.generate_json(prompt, schema)
-            └─> RunInference with VLLMModelHandler
-                    └─> vllm.LLM.generate(prompts, sampling_params=guided_json_params)
+    └─> model_client.generate_json(prompt, schema)            # our thin wrapper
+            └─> RunInference(VLLMCompletionsModelHandler)     # Beam-owned
+                    └─> subprocess: vllm.entrypoints.openai.api_server
+                            └─> openai.OpenAI(base_url=localhost:<port>/v1)
+                                    └─> completions.create(..., extra_body={"guided_json": schema})
 ```
 
 ## Files
 
-- `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_handler.py` — `ModelHandler` subclass for vLLM (M4 only).
-- `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_client.py` — `ModelClient` impl invoking the handler.
+- `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_client.py` — `ModelClient` impl that owns a `VLLMCompletionsModelHandler` instance and the `extra_body` formatting for guided JSON.
 - `packages/sdfb-beam/src/sdfb_beam/handlers/fake_client.py` — fixture-driven test impl (laptop).
+- `packages/sdfb-beam/src/sdfb_beam/handlers/mlx_client.py` — Apple Silicon smoke-test impl (M4 only) — see [ADR 0010](../../docs/adr/0010-m4-local-smoke-mlx.md).
 
-## vLLM guided JSON
+We do **not** write a `vllm_handler.py` — Beam's handler is used as-is.
 
-vLLM has native JSON-schema-guided decoding. Use it — do NOT rely on prompt-only JSON for production.
+## vLLM guided JSON via Beam's handler
+
+Beam's handler talks to vLLM via vLLM's OpenAI-compatible server, so guided JSON goes through the OpenAI client's `extra_body` (a vLLM-specific extension the server understands).
 
 ```python
-from vllm.sampling_params import GuidedDecodingParams, SamplingParams
+from apache_beam.ml.inference.vllm_inference import VLLMCompletionsModelHandler
 
-guided_params = GuidedDecodingParams(json=schema_dict)
-sampling = SamplingParams(
-    temperature=0.7,
-    max_tokens=2048,
-    guided_decoding=guided_params,
+handler = VLLMCompletionsModelHandler(
+    model_name="/local-ssd/model",  # local path after GCS warm-pull, NOT an HF id
+    vllm_server_kwargs={
+        "quantization": "awq",
+        "max-model-len": "8192",
+        "gpu-memory-utilization": "0.85",
+        "max-num-seqs": "16",
+        "dtype": "auto",
+    },
+    max_batch_size=16,
 )
-outputs = llm.generate(prompts=[prompt], sampling_params=sampling)
 ```
 
-REF: https://docs.vllm.ai/en/latest/usage/structured_outputs.html
+Inside `VLLMModelClient.generate_json(prompt, schema)`:
+
+```python
+# Pseudocode — the client owns the OpenAI call shape; the handler owns the subprocess.
+result = openai_client.completions.create(
+    model=model_name,
+    prompt=prompt,
+    temperature=0.7,
+    max_tokens=2048,
+    extra_body={
+        "guided_json": schema,                     # JSON-schema-guided decoding
+        "guided_decoding_backend": "outlines",     # vLLM's outlines backend
+    },
+)
+return json.loads(result.choices[0].text)
+```
+
+REFs:
+- vLLM structured outputs: https://docs.vllm.ai/en/latest/usage/structured_outputs.html
+- vLLM OpenAI-server extra parameters: https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html#extra-parameters-for-completions-api
+- Beam handler API: https://beam.apache.org/releases/pydoc/2.60.0/apache_beam.ml.inference.vllm_inference.html
 
 ## Gemma 4 native function calling
 
@@ -46,18 +74,24 @@ REF: https://ai.google.dev/gemma/docs/core
 
 ## Model load — from GCS, not HF Hub
 
-Worker `setup()` does:
+Worker `setup()` does the GCS warm-pull, then constructs Beam's handler pointing at the local path:
+
 ```python
 def setup(self):
     subprocess.run(
         ["gsutil", "-m", "cp", "-r", self.model_uri, "/local-ssd/model/"],
         check=True,
     )
-    from vllm import LLM
-    self.llm = LLM(model="/local-ssd/model", quantization="awq", ...)
+    self.handler = VLLMCompletionsModelHandler(
+        model_name="/local-ssd/model",
+        vllm_server_kwargs=self.vllm_server_kwargs,  # from config/models.yml
+        max_batch_size=16,
+    )
+    # Beam's handler.load_model() spawns the vLLM OpenAI server subprocess on
+    # first inference; warmup is ~30–60 s on top of the GCS pull.
 ```
 
-`HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set in the Dockerfile to make any accidental Hub call fail fast.
+`model_name` is a local filesystem path — vLLM's server CLI accepts paths the same way it accepts HF identifiers, which is the contract that keeps us on the right side of [ADR 0001](../../docs/adr/0001-no-managed-gcp-services.md). `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` in the Dockerfile make any accidental Hub call fail fast.
 
 ## Constrained-decoding fallback chain
 
@@ -71,7 +105,7 @@ Don't reach for the fallback unless you've reproduced the failure with a fixture
 
 ## RunInference batching
 
-`RunInference` batches across Beam bundles via `min_batch_size`/`max_batch_size`. Tune so each vLLM call sees ≥ 4 prompts — single-prompt calls leave the GPU mostly idle. Start with `max_batch_size=16` and measure GPU utilization in Cloud Monitoring (Dataflow GPU metrics).
+`VLLMCompletionsModelHandler` accepts `min_batch_size` / `max_batch_size` / `max_batch_duration_secs` / `max_batch_weight` directly in its constructor — no separate `BatchElements` wrapper needed. Beam batches across bundles. Tune so each vLLM call sees ≥ 4 prompts — single-prompt calls leave the GPU mostly idle. Start with `max_batch_size=16` and measure GPU utilization in Cloud Monitoring (Dataflow GPU metrics).
 
 REF: https://docs.cloud.google.com/dataflow/docs/gpu/gpu-metrics
 
@@ -82,13 +116,19 @@ REF: https://docs.cloud.google.com/dataflow/docs/gpu/gpu-metrics
 | `ModelClient` Protocol | `packages/sdfb-core/src/sdfb_core/engines/base.py` | ✅ done |
 | `FakeModelClient` (canned + echo modes) | `packages/sdfb-beam/src/sdfb_beam/handlers/fake_client.py` | ✅ done |
 | `FakeModelClient` tests | `packages/sdfb-tests/tests/unit/handlers/test_fake_client.py` | ✅ done |
-| `VLLMModelClient` + `VLLMModelHandler` | `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_*.py` | 🔒 M1 §9 |
+| `VLLMModelClient` (wraps Beam's `VLLMCompletionsModelHandler`) | `packages/sdfb-beam/src/sdfb_beam/handlers/vllm_client.py` | 🔒 M1 §9 — see [ADR 0011](../../docs/adr/0011-adopt-beam-vllm-model-handler.md) |
 
 Model registry (GCS URIs, vLLM args, license): `config/models.yml`. Layout / download procedure: [`docs/MODEL_LAYOUT.md`](../../docs/MODEL_LAYOUT.md).
 
 ## References
 
+- Beam `vllm_inference` API (the handler we adopted): https://beam.apache.org/releases/pydoc/2.60.0/apache_beam.ml.inference.vllm_inference.html
+- Beam example notebook (canonical recipe): https://github.com/apache/beam/blob/master/examples/notebooks/beam-ml/run_inference_vllm.ipynb
+- Dataflow tutorial: https://cloud.google.com/dataflow/docs/notebooks/run_inference_vllm
+- Beam Summit 2025 deck on serving with vLLM: https://beamsummit.org/slides/2025/how-beam-serves-models-with-vllm.pdf
+- Performance baseline (Gemma 2B / T4): https://beam.apache.org/performance/vllmgemmabatchtesla/
 - vLLM structured outputs: https://docs.vllm.ai/en/latest/usage/structured_outputs.html
+- vLLM OpenAI-server extra parameters: https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html#extra-parameters-for-completions-api
 - vLLM install: https://docs.vllm.ai/en/latest/getting_started/installation.html
 - outlines: https://github.com/outlines-dev/outlines
 - lm-format-enforcer: https://github.com/noamgat/lm-format-enforcer

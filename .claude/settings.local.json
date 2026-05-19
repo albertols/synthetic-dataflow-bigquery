@@ -18,7 +18,16 @@
       "Bash(.venv/bin/python -m pytest packages/sdfb-tests/tests -q --tb=short)",
       "Bash(~/.local/bin/uv lock *)",
       "Bash(git rm *)",
-      "Bash(~/.local/bin/uv export *)"
+      "Bash(~/.local/bin/uv export *)",
+      "Skill(remember)",
+      "WebFetch(domain:beamsummit.org)",
+      "WebFetch(domain:beam.apache.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.cloud.google.com)",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/apache/beam/master/examples/notebooks/beam-ml/run_inference_vllm.ipynb)",
+      "Bash(python3 -c \"import json,sys; nb=json.load\\(sys.stdin\\); [print\\('---CELL---\\\\n'+''.join\\(c.get\\('source',[]\\)\\)\\) for c in nb['cells'] if c['cell_type']=='code']\")",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/apache/beam/master/sdks/python/apache_beam/ml/inference/vllm_inference.py)",
+      "Bash(uv run *)"
     ]
   }
 }

@@ -20,7 +20,9 @@ Both binaries are copied into the final image via multi-stage `COPY --from`. See
 
 ```bash
 # REF: https://docs.cloud.google.com/dataflow/docs/gpu/use-gpus
---dataflow_service_options="worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver"
+# vLLM requires the 5xx driver series — 4xx breaks at module load.
+# REF: https://github.com/apache/beam/blob/master/examples/notebooks/beam-ml/run_inference_vllm.ipynb
+--dataflow_service_options="worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver:5xx"
 --worker_machine_type="g2-standard-8"
 --experiments=use_runner_v2
 --sdk_container_image="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/sdfb-python:${VERSION}"

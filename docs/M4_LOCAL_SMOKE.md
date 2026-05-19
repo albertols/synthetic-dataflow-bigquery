@@ -12,7 +12,7 @@ mkdir -p models/gemma4/e4b/v1       # see MODEL_LAYOUT.md for the Kaggle downloa
 # smoke test — uses your real _ddl.json
 uv run python scripts/hello_synthetic_mlx.py \
     --ddl_path output/CDH_dataset/ddl_metadata_CDH_dataset_KW860T_RR.json \
-    --reference_table cdh_dataset.synthetic_data \
+    --reference_table CDH_dataset.KW860T_RR \
     --reference_limit 5 \
     --num_rows 10 \
     --model_path ./models/gemma4/e4b/v1/

@@ -43,3 +43,4 @@ Keep ADRs tight — half a page is plenty. Detail belongs in the code or in skil
 - [0008 — Container image builds happen in CI, not on developer laptops](0008-ci-driven-builds.md)
 - [0009 — Single image for Flex Template launcher AND Dataflow workers](0009-single-flex-template-image.md)
 - [0010 — M4 local smoke test via MLX (no DirectRunner-with-Docker)](0010-m4-local-smoke-mlx.md)
+- [0011 — Adopt Beam's `VLLMCompletionsModelHandler` for §9](0011-adopt-beam-vllm-model-handler.md)

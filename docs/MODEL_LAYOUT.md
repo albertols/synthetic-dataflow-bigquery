@@ -131,7 +131,9 @@ For GGUF (llama.cpp / Ollama path):
 
 ## Runtime load — Dataflow / vLLM
 
-Inside `sdfb_beam/handlers/vllm_handler.py` (M1 §9):
+Per [ADR 0011](adr/0011-adopt-beam-vllm-model-handler.md), the serving path uses Beam's
+`apache_beam.ml.inference.vllm_inference.VLLMCompletionsModelHandler`. Inside
+`sdfb_beam/handlers/vllm_client.py` (M1 §9):
 
 ```python
 def setup(self):
@@ -140,13 +142,16 @@ def setup(self):
         ["gsutil", "-m", "cp", "-r", self.model_uri, "/local-ssd/model/"],
         check=True,
     )
-    from vllm import LLM
-    self.llm = LLM(
-        model="/local-ssd/model",
-        quantization="awq",           # for the AWQ-quantized variants
-        max_model_len=8192,
-        gpu_memory_utilization=0.85,
-        enforce_eager=False,
+    # Beam's handler spawns `python -m vllm.entrypoints.openai.api_server`
+    # under the hood. Pass server flags via vllm_server_kwargs.
+    self.handler = VLLMCompletionsModelHandler(
+        model_name="/local-ssd/model",
+        vllm_server_kwargs={
+            "quantization": "awq",
+            "max-model-len": "8192",
+            "gpu-memory-utilization": "0.85",
+        },
+        max_batch_size=16,
     )
 ```
 

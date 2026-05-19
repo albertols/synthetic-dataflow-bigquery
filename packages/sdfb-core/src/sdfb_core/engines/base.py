@@ -31,10 +31,13 @@ class ModelClient(Protocol):
     use — they import only this Protocol.
 
     The contract is intentionally narrow: a JSON-schema-guided generation
-    call. vLLM's `GuidedDecodingParams(json=schema)` is the primary
-    enforcement; outlines / lm-format-enforcer are fallback knobs.
+    call. The vLLM backend (via Beam's `VLLMCompletionsModelHandler`)
+    enforces the schema with vLLM's guided decoding; outlines /
+    lm-format-enforcer are fallback knobs. See ADR 0011.
 
-    REF: https://docs.vllm.ai/en/latest/usage/structured_outputs.html
+    REFs:
+      - docs/adr/0011-adopt-beam-vllm-model-handler.md
+      - https://docs.vllm.ai/en/latest/usage/structured_outputs.html
     """
 
     def generate_json(
