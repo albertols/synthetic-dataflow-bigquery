@@ -103,6 +103,15 @@ class MLXModelClient:
 
         max_tokens = max_tokens or self.default_max_tokens
         wrapped_prompt = self._wrap_with_schema(prompt, json_schema)
+        # Gemma 4 Instruct expects the chat template (`<start_of_turn>user …
+        # <end_of_turn>\n<start_of_turn>model\n`). Without it, the model
+        # treats input as a raw completion, never emits EOS, and runs to
+        # max_tokens.
+        chat_prompt = self._tokenizer.apply_chat_template(
+            [{"role": "user", "content": wrapped_prompt}],
+            add_generation_prompt=True,
+            tokenize=False,
+        )
         # mlx-lm ≥0.20 routes sampling params through a sampler callable
         # instead of accepting temp= directly on generate().
         sampler = self._sampler.make_sampler(temp=temperature)
@@ -112,7 +121,7 @@ class MLXModelClient:
             text = generate(
                 self._model,
                 self._tokenizer,
-                prompt=wrapped_prompt,
+                prompt=chat_prompt,
                 max_tokens=max_tokens,
                 sampler=sampler,
                 verbose=False,
