@@ -5,8 +5,10 @@ two satisfy the same `ModelClient` Protocol; engines never know which
 one they have. See [ADR 0010](../../../../docs/adr/0010-m4-local-smoke-mlx.md)
 for the rationale.
 
-Install: `uv sync --extra mlx` on the M4. The marker `sys_platform == 'darwin'`
-in pyproject.toml prevents accidental install on Linux.
+Install: `uv sync --package sdfb-beam --extra mlx` on the M4. The marker
+`sys_platform == 'darwin'` in pyproject.toml prevents accidental install
+on Linux. The `--package sdfb-beam` selector is required because the
+`[mlx]` extra lives on the workspace member, not on the root.
 
 REFs:
   - mlx-lm: https://github.com/ml-explore/mlx-examples/tree/main/llms
@@ -52,8 +54,9 @@ class MLXModelClient:
             from mlx_lm import load, sample_utils
         except ImportError as e:
             raise ImportError(
-                "mlx-lm is not installed. Run `uv sync --extra mlx` on Apple "
-                "Silicon. MLXModelClient is not available on Linux/x86."
+                "mlx-lm is not installed. Run "
+                "`uv sync --package sdfb-beam --extra mlx` on Apple Silicon. "
+                "MLXModelClient is not available on Linux/x86."
             ) from e
 
         logger.info("Loading MLX model from %s", self.model_uri)

@@ -6,8 +6,8 @@ Fast iteration loop on the M4 against a **real** LLM, no Dataflow time, no GPU i
 
 ```bash
 # one-time per machine
-uv sync --extra mlx                 # installs mlx + mlx-lm on Apple Silicon
-mkdir -p models/gemma4/e4b/v1       # see MODEL_LAYOUT.md for the Kaggle download
+uv sync --package sdfb-beam --extra mlx   # installs mlx + mlx-lm on Apple Silicon
+mkdir -p models/gemma4/e4b/v1             # see MODEL_LAYOUT.md for the Kaggle download
 
 # smoke test — uses your real _ddl.json
 uv run python scripts/hello_synthetic_mlx.py \
@@ -75,10 +75,12 @@ Validates: end-to-end DAG including generation DoFn, ValidateRecordDoFn, Pandera
 ### 1. Install MLX extras
 
 ```bash
-uv sync --extra mlx
+uv sync --package sdfb-beam --extra mlx
 ```
 
-The `[mlx]` extra in `packages/sdfb-beam/pyproject.toml` carries `sys_platform == 'darwin' and platform_machine == 'arm64'` markers, so it's a no-op on Linux/x86 (CI runners) and only installs on Apple Silicon.
+The `[mlx]` extra is defined on the `sdfb-beam` workspace **member**, not on the workspace root, so the `--package sdfb-beam` selector is required — a bare `uv sync --extra mlx` errors with "Extra `mlx` is not defined in the project's optional-dependencies table" because uv looks for extras on the root project only. (Same goes for `gpu` / `embedding` / `library`; the GPU Dockerfile uses `--all-packages` to scope all of them at once.)
+
+The extra carries `sys_platform == 'darwin' and platform_machine == 'arm64'` markers, so it's a no-op on Linux/x86 (CI runners) and only installs on Apple Silicon.
 
 ### 2. Get Gemma 4 E4B weights
 
