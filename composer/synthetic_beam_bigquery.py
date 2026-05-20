@@ -1,15 +1,19 @@
 """Airflow DAG — submit the synthetic-dataflow-bigquery Flex Template.
 
-This file is the *template*. Workflow `3_import_dag.yaml` runs `sed` over it
-at deploy time to substitute build-time values (env, project version, DAG
-version, network tags). Runtime values (table_fqn, num_rows, run_id) come
-from Airflow DAG params — operators don't need to re-import the DAG to
-change them.
+This file is the *template*. Workflow `3_db_import_dag.yaml` runs `sed` over
+it at deploy time to substitute build-time values. Runtime values
+(table_fqn, num_rows, run_id) come from Airflow DAG params and Composer
+Variables — operators don't need to re-import the DAG to change them.
 
 Substitution markers:
   {{PROJECT_VERSION}}     project version of the sdfb-beam package being deployed
   {{DAG_VERSION}}         {{PROJECT_VERSION}}_<ISO timestamp> (unique DAG id)
   {{ENV}}                 dev | uat | prd
+  {{EXECUTION_DATES}}     (reserved, unused for batch synthetic)
+
+Network tag literals (devnetproxy / netsegcloudegress / artifactory / gke /
+dataflow) are copied verbatim from the pe-btr-producer-scala-beam mediation
+DAG — bank standard.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ region = Variable.get("REGION")
 subnetwork = Variable.get("DATAFLOW_SUBNET")
 service_account = Variable.get("SA_DATAFLOW")
 model_uri = Variable.get("SDFB_MODEL_URI")  # gs://<project>-models/gemma4/26b-a4b-awq/v1/
+default_table_fqn = Variable.get("SDFB_DEFAULT_TABLE_FQN")
 
 # -----------------------------------------------------------------------------
 # Build-time substituted constants (replaced by sed in workflow 3).
@@ -47,16 +52,23 @@ job_name = f"{app_domain}-{app_name}-v{project_version.replace('.', '-').lower()
 flex_template = f"sdfb-{project_version}-template.json"
 dag_id = f"{app_domain}_{app_name}_{dag_version}"
 
-# Network tags — env-specific, set via sed substitution. Bank pattern.
-dataflow_tag = f"int-{env_name}-<TEAM_NETWORK_TAG>-dataflow"
-
+# Network tags — five-tag chain, bank standard (see ebm_mediation.py).
+devnetproxy_tag = "baseline-int-{{ENV}}-152100-1-devnetproxy"
+netseg_network_tag = "baseline-int-{{ENV}}-152100-1-netsegcloudegress"
+artifactory_network_tag = "baseline-int-{{ENV}}-97434-1-artifactory"
+gke_network_tag = "int-{{ENV}}-125479-2-pwcc-es-gke"
+dataflow_network_tag = "int-{{ENV}}-125479-2-pwcc-es-dataflow"
+network_tags_chain = (
+    f"{dataflow_network_tag};{netseg_network_tag};{artifactory_network_tag};"
+    f"{gke_network_tag};{devnetproxy_tag}"
+)
 # -----------------------------------------------------------------------------
 # DAG params — runtime-overridable on every trigger.
 # -----------------------------------------------------------------------------
 default_dag_params = {
     "table_fqn": {
         "type": "string",
-        "default": "<DEFAULT_TABLE_FQN>",
+        "default": default_table_fqn,
         "description": "FQN of the source BigQuery table to clone.",
     },
     "num_rows": {
@@ -83,13 +95,13 @@ default_dag_params = {
 }
 
 with models.DAG(
-    dag_id=dag_id,
-    start_date=days_ago(1),
-    schedule_interval="@once",
-    catchup=False,
-    max_active_runs=1,
-    tags=["SYNTHETIC", "Dataflow", env_name.upper()],
-    params=default_dag_params,
+        dag_id=dag_id,
+        start_date=days_ago(1),
+        schedule_interval="@once",
+        catchup=False,
+        max_active_runs=1,
+        tags=["SYNTHETIC", "Dataflow", env_name.upper()],
+        params=default_dag_params,
 ) as dag:
     DataflowStartFlexTemplateOperator(
         task_id=f"start_{app_name}",
@@ -107,8 +119,12 @@ with models.DAG(
                     "serviceAccountEmail": service_account,
                     "additionalExperiments": [
                         "use_runner_v2",
-                        f"use_network_tags={dataflow_tag}",
-                        f"use_network_tags_for_flex_templates={dataflow_tag}",
+                        "upload_graph",
+                        "enable_secure_boot",
+                        # L4 GPU worker — see docs/GPU_CONTAINER.md.
+                        "worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver",
+                        f"use_network_tags={network_tags_chain}",
+                        f"use_network_tags_for_flex_templates={network_tags_chain}",
                     ],
                     "additionalUserLabels": {
                         "app": app_name,

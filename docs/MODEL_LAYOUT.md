@@ -137,11 +137,18 @@ Per [ADR 0011](adr/0011-adopt-beam-vllm-model-handler.md), the serving path uses
 
 ```python
 def setup(self):
-    # One-time per worker — copy from GCS to local SSD.
-    subprocess.run(
-        ["gsutil", "-m", "cp", "-r", self.model_uri, "/local-ssd/model/"],
-        check=True,
-    )
+    # One-time per worker — copy from GCS to local SSD via the Python client
+    # (NOT gsutil — the CLI would force a packages.cloud.google.com apt
+    # install the enterprise build can't reach; see ADR 0012).
+    from google.cloud import storage
+    bucket_name, prefix = _split_gs_uri(self.model_uri)
+    client = storage.Client()                          # ADC on worker
+    for blob in client.list_blobs(bucket_name, prefix=prefix):
+        rel = blob.name[len(prefix):]
+        if rel:
+            dest = Path("/local-ssd/model") / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            blob.download_to_filename(dest)
     # Beam's handler spawns `python -m vllm.entrypoints.openai.api_server`
     # under the hood. Pass server flags via vllm_server_kwargs.
     self.handler = VLLMCompletionsModelHandler(

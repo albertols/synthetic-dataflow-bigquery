@@ -10,8 +10,10 @@ This stub exists so that:
      `setup()`, which only runs on a Dataflow worker with the `[gpu]`
      extra installed.
 
-The real implementation (per ADR 0011) will:
-  - `gsutil -m cp -r {model_uri}/ /local-ssd/model/` in `setup()`.
+The real implementation (per ADR 0011 + ADR 0012) will:
+  - Pull weights in `setup()` via the `google-cloud-storage` Python client
+    (NOT `gsutil` — the CLI would need a packages.cloud.google.com apt
+    install the enterprise build can't reach; ADC authenticates the client).
   - Construct a single `VLLMCompletionsModelHandler(model_name=
     "/local-ssd/model", vllm_server_kwargs={...})` per worker. Beam's
     handler owns the subprocess server lifecycle.
@@ -20,7 +22,8 @@ The real implementation (per ADR 0011) will:
     "outlines"}` and parse `PredictionResult.inference.choices[0].text`.
 
 REFs:
-  - docs/adr/0011-adopt-beam-vllm-model-handler.md (decision)
+  - docs/adr/0011-adopt-beam-vllm-model-handler.md (handler decision)
+  - docs/adr/0012-enterprise-image-build.md (JFrog bases, GCS-client pull)
   - docs/MODEL_LAYOUT.md (weight layout)
   - .claude/skills/model-handler.md (recipe)
   - https://beam.apache.org/releases/pydoc/2.60.0/apache_beam.ml.inference.vllm_inference.html

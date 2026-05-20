@@ -115,8 +115,11 @@ jobs:
             **/pyproject.toml
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Sync workspace (with GPU/embedding/library extras, no dev tools)
-        run: uv sync --frozen --no-dev --all-packages --extra gpu --extra embedding --extra library
+      - name: Sync workspace for the sanity gate (dev tools, no heavy extras)
+        # pytest -m "not gpu and not gcp" imports none of vllm/torch/faiss/sdgx,
+        # so we skip those extras here — they're installed inside the docker
+        # build, where they're actually used. Keeps the gate fast.
+        run: uv sync --frozen --all-packages
 
       - name: Sanity gate — laptop-side tests
         # Rejects broken code before the slow docker build runs.
@@ -146,6 +149,11 @@ jobs:
           IMG="$ARTIFACTORY_HOSTNAME/dkr-public-local/$ARTIFACTORY_NAMESPACE/$IMAGE_NAME"
           echo "$ARTIFACTORY_RELEASER_PASSWORD" | docker login --password-stdin \
               --username "$ARTIFACTORY_RELEASER_USERNAME" "$ARTIFACTORY_HOSTNAME/"
+          # Base images resolve from JFrog via ARTIFACTORY_HOSTNAME_ARG (the
+          # Dockerfile interpolates CUDA_IMAGE/BEAM_SDK_IMAGE off it). The
+          # Flex launcher defaults to gcr.io — if ARC runners cannot reach
+          # gcr.io, uncomment the --build-arg LAUNCHER_IMAGE override below
+          # with the JFrog-mirrored path (see ADR 0012).
           DOCKER_BUILDKIT=1 docker build \
             --platform=linux/amd64 \
             -f docker/Dockerfile \
@@ -157,6 +165,7 @@ jobs:
             --build-arg ARTIFACTORY_RELEASER_USERNAME_ARG=$ARTIFACTORY_RELEASER_USERNAME \
             --build-arg ARTIFACTORY_RELEASER_PWD_ARG=$ARTIFACTORY_RELEASER_PASSWORD \
             .
+            # --build-arg LAUNCHER_IMAGE=$ARTIFACTORY_HOSTNAME/<mirror>/dataflow-templates-base/python311-template-launcher-base \
           docker push "$IMG:$RELEASE_VERSION"
           docker push "$IMG:latest"
 

@@ -74,14 +74,19 @@ REF: https://ai.google.dev/gemma/docs/core
 
 ## Model load — from GCS, not HF Hub
 
-Worker `setup()` does the GCS warm-pull, then constructs Beam's handler pointing at the local path:
+Worker `setup()` does the GCS warm-pull via the **`google-cloud-storage` Python client** (not `gsutil` — see [ADR 0012](../../docs/adr/0012-enterprise-image-build.md): the CLI drags in a `packages.cloud.google.com` apt dependency the enterprise build can't reach), then constructs Beam's handler pointing at the local path:
 
 ```python
 def setup(self):
-    subprocess.run(
-        ["gsutil", "-m", "cp", "-r", self.model_uri, "/local-ssd/model/"],
-        check=True,
-    )
+    from google.cloud import storage
+    bucket_name, prefix = _split_gs_uri(self.model_uri)
+    client = storage.Client()                              # ADC on worker
+    for blob in client.list_blobs(bucket_name, prefix=prefix):
+        rel = blob.name[len(prefix):]
+        if rel:
+            dest = Path("/local-ssd/model") / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            blob.download_to_filename(dest)
     self.handler = VLLMCompletionsModelHandler(
         model_name="/local-ssd/model",
         vllm_server_kwargs=self.vllm_server_kwargs,  # from config/models.yml

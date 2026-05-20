@@ -18,21 +18,35 @@
 # carry the locked decisions.
 
 # ---------------------------------------------------------------------------
-# Stage 1 — Beam SDK source layer (Python 3.11). Pinned to match the laptop
-# venv (apache-beam 2.73.0).
+# Base images — ALL pulled from corporate JFrog (ARC build runners cannot
+# reach Docker Hub or gcr.io). Refs are build-args so CI injects the exact
+# JFrog paths; the defaults below are best-guesses — confirm the precise
+# pull strings with the platform team. See ADR 0012.
+#
+#   CUDA:     com/db/awp/cuda  tag 12.2.2-cudnn-runtime-ubuntu22.04
+#   Beam SDK: dkr-io/apache/beam_python3.11_sdk:2.71.0 (only ver in JFrog →
+#             apache-beam pinned ==2.71.0 in packages/sdfb-beam/pyproject.toml)
+#   Launcher: gcr.io/dataflow-templates-base/python311-template-launcher-base
+#             — MIRROR to JFrog if gcr.io is unreachable from ARC runners.
 # ---------------------------------------------------------------------------
-FROM apache/beam_python3.11_sdk:2.73.0 AS beam_sdk
+ARG ARTIFACTORY_HOSTNAME_ARG="artifactory.sdlc.ctl.gcp.db.com"
+ARG CUDA_IMAGE="${ARTIFACTORY_HOSTNAME_ARG}/com/db/awp/cuda:12.2.2-cudnn-runtime-ubuntu22.04"
+ARG BEAM_SDK_IMAGE="${ARTIFACTORY_HOSTNAME_ARG}/dkr-io/apache/beam_python3.11_sdk:2.71.0"
+ARG LAUNCHER_IMAGE="gcr.io/dataflow-templates-base/python311-template-launcher-base"
 
-# ---------------------------------------------------------------------------
+# Stage 1 — Beam SDK worker boot (version-matched to apache-beam==2.71.0).
+FROM ${BEAM_SDK_IMAGE} AS beam_sdk
+
 # Stage 2 — Python Flex Template launcher source layer.
-# ---------------------------------------------------------------------------
-FROM gcr.io/dataflow-templates-base/python311-template-launcher-base AS flex_launcher
+FROM ${LAUNCHER_IMAGE} AS flex_launcher
 
 # ---------------------------------------------------------------------------
-# Stage 3 — CUDA + cuDNN runtime base, with Python 3.11, gcloud (for the
-# per-worker model warm-pull from GCS), uv-installed workspace.
+# Stage 3 — CUDA + cuDNN runtime base + Python 3.11 + uv-installed workspace.
+# The NVIDIA driver is NOT baked in: Dataflow's `install-nvidia-driver`
+# installs it on the host VM and mounts it at /usr/local/nvidia/. The model
+# warm-pull uses the google-cloud-storage Python client (no gcloud CLI).
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM ${CUDA_IMAGE}
 
 ARG ENV_NAME_ARG="unset"
 ARG ARTIFACTORY_HOSTNAME_ARG="unset"
@@ -50,16 +64,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ARTIFACTORY_RELEASER_USERNAME=$ARTIFACTORY_RELEASER_USERNAME_ARG \
     ARTIFACTORY_RELEASER_PASSWORD=$ARTIFACTORY_RELEASER_PWD_ARG
 
-# System dependencies (Python 3.11, gcloud CLI, CA certs).
+# System deps from the INTERNAL apt mirror only — no PPA, no gcr.io, no
+# packages.cloud.google.com. If the mirror lacks python3.11 (Ubuntu 22.04
+# ships 3.10), fall back to uv-managed Python via UV_PYTHON_INSTALL_MIRROR
+# pointed at a JFrog generic repo. See ADR 0012.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3.11-venv python3.11-dev python3-pip \
-        ca-certificates curl gnupg apt-transport-https \
-    && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-        | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] \
-        https://packages.cloud.google.com/apt cloud-sdk main" \
-        > /etc/apt/sources.list.d/google-cloud-sdk.list \
-    && apt-get update && apt-get install -y --no-install-recommends google-cloud-cli \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
@@ -68,7 +79,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=beam_sdk      /opt/apache/beam                                /opt/apache/beam
 COPY --from=flex_launcher /opt/google/dataflow/python_template_launcher   /opt/google/dataflow/python_template_launcher
 
-RUN pip install --no-cache-dir uv
+# Bootstrap uv from the JFrog pypi mirror (pyproject's [[tool.uv.index]]
+# resolves the rest of the dependency tree from the same mirror).
+RUN pip3 install --no-cache-dir \
+        --index-url "https://${ARTIFACTORY_HOSTNAME_ARG}/artifactory/api/pypi/pypi-all/simple" \
+        uv
 
 WORKDIR /workspace
 

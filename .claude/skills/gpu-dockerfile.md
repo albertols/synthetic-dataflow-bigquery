@@ -20,9 +20,10 @@ Both binaries are copied into the final image via multi-stage `COPY --from`. See
 
 ```bash
 # REF: https://docs.cloud.google.com/dataflow/docs/gpu/use-gpus
-# vLLM requires the 5xx driver series — 4xx breaks at module load.
-# REF: https://github.com/apache/beam/blob/master/examples/notebooks/beam-ml/run_inference_vllm.ipynb
---dataflow_service_options="worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver:5xx"
+# Official driver-version values are `default` or `latest` (NOT a literal
+# `5xx` — that's a COS driver-branch shorthand from the Beam notebook).
+# `latest` gives a 5xx-series driver, which is what vLLM needs (≥525 for L4).
+--dataflow_service_options="worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver:latest"
 --worker_machine_type="g2-standard-8"
 --experiments=use_runner_v2
 --sdk_container_image="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/sdfb-python:${VERSION}"
@@ -34,22 +35,28 @@ Both binaries are copied into the final image via multi-stage `COPY --from`. See
 
 `g2-standard-8` = 1×L4 (24 GB VRAM), 8 vCPU, 32 GB RAM. Upgrade to `g2-standard-24` if NVIDIA MPS is needed for multi-process GPU sharing.
 
+**Base images come from JFrog**, not Docker Hub / gcr.io (ARC build runners are network-restricted). CUDA `com/db/awp/cuda:12.2.2-cudnn-runtime-ubuntu22.04`, Beam SDK `dkr-io/apache/beam_python3.11_sdk:2.71.0` (→ `apache-beam==2.71.0` pin). Networking prereqs (Private Google Access, Secure Boot vs driver, JFrog egress) and the full rationale: [ADR 0012](../../docs/adr/0012-enterprise-image-build.md).
+
 ## Model warm-pull
 
-The image is intentionally weights-free. Model weights live in `gs://{project}-models/{family}/{model}/{version}/` and are pulled once per worker lifetime inside the `ModelClient.setup()` method:
+The image is intentionally weights-free. Model weights live in `gs://{project}-models/{family}/{model}/{version}/` and are pulled once per worker lifetime inside the `ModelClient.setup()` method. We use the **`google-cloud-storage` Python client**, not `gsutil` — the CLI would force a `google-cloud-cli` apt install from `packages.cloud.google.com`, which ARC runners and private-IP workers can't reach. The client is already a transitive dep of `apache-beam[gcp]` and authenticates via ADC.
 
 ```python
 # packages/sdfb-beam/src/sdfb_beam/handlers/vllm_client.py (real impl in M1 §9)
 def setup(self):
-    subprocess.run(
-        ["gsutil", "-m", "cp", "-r", self.model_uri, "/local-ssd/model/"],
-        check=True,
-    )
-    from vllm import LLM
-    self.llm = LLM(model="/local-ssd/model", quantization="awq", ...)
+    from google.cloud import storage
+    bucket_name, prefix = _split_gs_uri(self.model_uri)   # gs://b/p/ -> (b, p/)
+    client = storage.Client()                              # ADC on worker
+    for blob in client.list_blobs(bucket_name, prefix=prefix):
+        rel = blob.name[len(prefix):]
+        if not rel:                                        # skip dir placeholder
+            continue
+        dest = Path("/local-ssd/model") / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(dest)                    # parallelize with a thread pool
 ```
 
-This keeps the image ~3 GB instead of ~15 GB with weights baked in. Worker cold-start budget: ≤ 3 min total, including this pull. See [`docs/MODEL_LAYOUT.md`](../../docs/MODEL_LAYOUT.md) for the GCS layout contract.
+This keeps the image weights-free (~3 GB vs ~15 GB baked-in) and removes the gcloud CLI dependency entirely. Worker cold-start budget: ≤ 3 min total, including this pull. See [`docs/MODEL_LAYOUT.md`](../../docs/MODEL_LAYOUT.md) for the GCS layout contract.
 
 ## NVIDIA MPS — when
 
