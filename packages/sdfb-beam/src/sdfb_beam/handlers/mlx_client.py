@@ -103,6 +103,9 @@ class MLXModelClient:
 
         max_tokens = max_tokens or self.default_max_tokens
         wrapped_prompt = self._wrap_with_schema(prompt, json_schema)
+        # mlx-lm ≥0.20 routes sampling params through a sampler callable
+        # instead of accepting temp= directly on generate().
+        sampler = self._sampler.make_sampler(temp=temperature)
 
         out: list[dict] = []
         for _ in range(n):
@@ -111,7 +114,7 @@ class MLXModelClient:
                 self._tokenizer,
                 prompt=wrapped_prompt,
                 max_tokens=max_tokens,
-                temp=temperature,
+                sampler=sampler,
                 verbose=False,
             )
             payload = self._extract_first_json_object(text)
