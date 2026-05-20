@@ -164,11 +164,15 @@ def setup(self):
 
 `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set in `docker/Dockerfile` (M1 §10) so any accidental Hub call fails loudly. The model directory must be self-contained.
 
-### Verify vLLM can serve the model BEFORE §11
+### §11 vLLM acceptance — what the Dataflow probe must confirm
 
-`scripts/vllm_spike.py` boots the vLLM OpenAI server against a local model dir exactly the way Beam's handler does, then checks: (Q1) does the server come up, (Q2) is the chain-of-thought channel suppressible, (Q3) does guided JSON conform. Run it on a **CUDA box (g2-standard-8 / 1×L4)** — not the M4 (vLLM is CPU-only there). See the docstring for setup.
+GPU validation happens via the §11 Dataflow probe (`scripts/probe_gpu_dataflow.sh`) once the image is built — there's no separate laptop test (vLLM is CUDA-only). The probe (1-row job) must confirm the vLLM serving path:
 
-> **Version requirement (resolved 2026-05-21):** Gemma 4 (`model_type=gemma4`) needs **transformers ≥ 5.5.0**, which vLLM only adopted in **v0.20.0** (v0.21.0 deprecates transformers v4). vLLM 0.11.0 fails at config parse (`rope_scaling should have a 'rope_type' key`). The `[gpu]` extra now pins `vllm>=0.21.0` and `[embedding]` `transformers>=5.5.0`. vLLM has full Gemma 4 support (MoE, multimodal, reasoning, tool-use) since v0.20 — no fallback model needed. Re-run the spike on a CUDA box after `uv lock`; verify the JFrog mirror has these versions and that the CUDA base (12.2.2) is recent enough for vLLM 0.21's torch.
+- **Server loads the model** — `Gemma4ForConditionalGeneration` accepted (needs vLLM ≥ 0.21; see version note below).
+- **Thinking channel suppressed** — pass `chat_template_kwargs={"enable_thinking": False}` via the **chat** endpoint (not raw completions); otherwise the model spends the token budget on chain-of-thought and truncates the JSON (see the Gemma 4 project memory).
+- **Guided JSON conforms** — `extra_body={"guided_json": schema}` yields schema-valid output ([ADR 0011](adr/0011-adopt-beam-vllm-model-handler.md)).
+
+> **Version requirement (resolved 2026-05-21):** Gemma 4 (`model_type=gemma4`) needs **transformers ≥ 5.5.0**, which vLLM only adopted in **v0.20.0** (v0.21.0 deprecates transformers v4). Older vLLM fails at config parse (`rope_scaling should have a 'rope_type' key`). The `[gpu]` extra pins `vllm>=0.21.0` and `[embedding]` `transformers>=5.5.0`. vLLM has full Gemma 4 support (MoE, multimodal, reasoning, tool-use) since v0.20 — no fallback model needed. Before the probe: `uv lock`, verify the JFrog mirror has these versions, and confirm the CUDA base (12.2.2) is recent enough for vLLM 0.21's torch.
 
 ## Runtime load — local M4 (stretch goal, MLX example)
 

@@ -24,3 +24,7 @@ push_image.sh
 # false positives on substrings like `sdfb-gpu-something`.
 sdfb-gpu:
 sdfb-gpu/
+
+# 2026-05-21 — vllm_spike.py deleted (no local GPU; §11 Dataflow probe is the
+# vLLM validation path). Catch any re-introduced reference.
+vllm_spike

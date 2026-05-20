@@ -77,13 +77,14 @@ One-time ~2–3 min on first install, ~600 MB on disk. Installs `sdfb-core` + `s
 
 If you ever see `ModuleNotFoundError: No module named 'sdfb_core'` after a sync, it means the workspace members weren't installed (e.g. someone removed `sdfb-tests` from the root `dev` group). Quick fix: `uv sync --all-packages --group dev`.
 
-To install the optional extras later (only needed when you start working on the GPU / RAG / library pieces):
+Optional extras for M4 work:
 
 ```bash
-uv sync --group dev --extra gpu --extra embedding --extra library
+uv sync --group dev --extra embedding --extra library   # RAG (§7) / library (§6) dev
+uv sync --package sdfb-beam --extra mlx                  # real-LLM smoke (see M4_LOCAL_SMOKE.md)
 ```
 
-Pulls vLLM + torch + faiss + sdgx — much larger, only worth it when you start §6 / §7 / §9.
+**Do NOT install `--extra gpu` on the M4.** vLLM is CUDA-only and the `[gpu]` extra is marked `sys_platform == 'linux'`, so it's a no-op here by design — vLLM only ever runs inside the Dataflow container ([ADR 0010](adr/0010-m4-local-smoke-mlx.md)). On the M4 you exercise the LLM path through MLX, never vLLM. The `[gpu]` extra is resolved only when the linux GPU image is built ([ADR 0012](adr/0012-enterprise-image-build.md)).
 
 ### 4. Sanity check — the 68 laptop tests must pass on the M4
 

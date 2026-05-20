@@ -33,7 +33,7 @@ gpu = [
     # Marked linux-only — vLLM ships no macOS wheels, and it only ever runs
     # inside the GPU container anyway (the M4 spike is not viable; ADR 0010).
     "vllm>=0.21.0; sys_platform == 'linux'",
-    "torch>=2.4.0",
+    "torch>=2.4.0; sys_platform == 'linux'",
 ]
 # B.1 RAG engine — local-only embedder (weights mirrored to GCS, no HF Hub).
 embedding = [
