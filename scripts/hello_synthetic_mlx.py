@@ -58,6 +58,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--output_dir", default="output",
                    help="Output JSONL goes to <output_dir>/<table>/hello_synthetic_mlx.jsonl")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--max_tokens", type=int, default=4096,
+                   help="Generation cap. 67-col records + any reasoning easily exceed 2048")
+    p.add_argument("--temperature", type=float, default=0.2,
+                   help="Low temp favors schema conformance for structured output")
     p.add_argument("--verbose", action="store_true",
                    help="DEBUG logging — surfaces the raw MLX text on parse failure")
     return p.parse_args(argv)
@@ -105,7 +109,10 @@ def main(argv: list[str] | None = None) -> int:
             row_start = time.perf_counter()
             anchor = ref_rows[rng.randrange(len(ref_rows))]
             prompt = _build_prompt(anchor, schema.fqn)
-            raw = client.generate_json(prompt, record_schema, n=1)
+            raw = client.generate_json(
+                prompt, record_schema, n=1,
+                max_tokens=args.max_tokens, temperature=args.temperature,
+            )
             row_secs = time.perf_counter() - row_start
             if not raw:
                 parse_fail_count += 1

@@ -40,7 +40,7 @@ class MLXModelClient:
         rows = c.generate_json(prompt, schema, n=5)
     """
 
-    def __init__(self, model_uri: str, max_tokens: int = 2048) -> None:
+    def __init__(self, model_uri: str, max_tokens: int = 4096) -> None:
         # Strip gs:// scheme if present — MLX wants a local path.
         self.model_uri = model_uri.removeprefix("gs://")
         self.default_max_tokens = max_tokens
@@ -110,10 +110,16 @@ class MLXModelClient:
         # treats input as a raw completion, never emits EOS, and runs to
         # max_tokens.
         try:
+            # enable_thinking=False suppresses Gemma 4's chain-of-thought
+            # channel, which otherwise spends ~1-1.5k tokens enumerating the
+            # anchor before emitting JSON — starving the token budget and
+            # truncating the object. Unknown template kwargs are ignored by
+            # Jinja, so this is safe even if the template doesn't use it.
             chat_prompt = self._tokenizer.apply_chat_template(
                 [{"role": "user", "content": wrapped_prompt}],
                 add_generation_prompt=True,
                 tokenize=False,
+                enable_thinking=False,
             )
         except ValueError:
             # tokenizer_config.json has no chat_template. This usually means
