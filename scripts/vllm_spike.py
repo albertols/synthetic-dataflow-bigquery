@@ -148,6 +148,35 @@ def wait_until_ready(client, proc, timeout: int) -> str | None:
     return None
 
 
+def diagnose_startup_failure(log_lines: list[str]) -> str:
+    """Pattern-match the captured server log to a likely cause. The server can
+    die for many reasons BEFORE the architecture is even loaded (config parsing,
+    OOM, CPU-only) — don't assume 'architecture rejected'."""
+    blob = "\n".join(log_lines).lower()
+    hints: list[str] = []
+    if "platform cpu" in blob:
+        hints.append(
+            "vLLM ran in CPU mode (no CUDA detected) — NOT the L4 path. The "
+            "result is not authoritative for GPU; rerun on a CUDA box."
+        )
+    if "rope_scaling" in blob or "rope_type" in blob or "rope_parameters" in blob:
+        hints.append(
+            "Config-parsing error on the model's ROPE settings — this vLLM "
+            "version does not understand the model's rope schema (Gemma 4 uses "
+            "nested `rope_parameters`, not a flat `rope_scaling.rope_type`). "
+            "This is a vLLM-version support gap, NOT an architecture rejection, "
+            "and it fails identically on GPU. Fix: a vLLM build with explicit "
+            "Gemma 4 support, or try `--model-impl transformers`."
+        )
+    if "is not supported" in blob or "are not supported" in blob or "no model" in blob:
+        hints.append("vLLM reports the model architecture itself is unsupported.")
+    if "out of memory" in blob or "cuda out of memory" in blob:
+        hints.append("Out of memory — lower --gpu_memory_utilization / --max_model_len.")
+    if not hints:
+        hints.append("Unrecognized startup error — read the traceback above.")
+    return "\n".join(f"  - {h}" for h in hints)
+
+
 def detect_thinking(text: str, message) -> bool:
     if any(m in text for m in THINKING_MARKERS):
         return True
@@ -208,15 +237,14 @@ def main(argv: list[str] | None = None) -> int:
         model_id = wait_until_ready(client, proc, args.startup_timeout)
         if model_id is None:
             print("\n" + "=" * 70)
-            print("Q1 FAIL — vLLM did not start. Likely it rejected the model "
-                  "architecture (Gemma4ForConditionalGeneration / multimodal).")
-            print("Last server log lines:")
+            print("Q1 FAIL — vLLM server did not come up. Diagnosis:")
+            print(diagnose_startup_failure(list(log_tail)))
+            print("\nLast server log lines:")
             for line in log_tail:
                 print("   ", line)
             print("=" * 70)
-            print("Next: try --trust_remote_code, or check vLLM's supported-models "
-                  "list / multimodal serving for Gemma 4. If unsupported, the "
-                  "fallback per the memo is Qwen 2.5 7B (ADR-0002).")
+            print("If the model family is genuinely unsupported by this vLLM "
+                  "build, the fallback per the memo is Qwen 2.5 7B (ADR-0002).")
             return 1
 
         results["Q1 arch accepted"] = f"PASS — vLLM serving '{model_id}'"

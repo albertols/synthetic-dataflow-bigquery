@@ -164,6 +164,12 @@ def setup(self):
 
 `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set in `docker/Dockerfile` (M1 §10) so any accidental Hub call fails loudly. The model directory must be self-contained.
 
+### Verify vLLM can serve the model BEFORE §11
+
+`scripts/vllm_spike.py` boots the vLLM OpenAI server against a local model dir exactly the way Beam's handler does, then checks: (Q1) does the server come up, (Q2) is the chain-of-thought channel suppressible, (Q3) does guided JSON conform. Run it on a **CUDA box (g2-standard-8 / 1×L4)** — not the M4 (vLLM is CPU-only there). See the docstring for setup.
+
+> **Known blocker (2026-05-21):** vLLM 0.11.0 fails to parse Gemma 4's rope config (`rope_scaling should have a 'rope_type' key` — Gemma 4 uses nested `rope_parameters`). This is platform-independent (fails on L4 too) and must be cleared before §11: a vLLM build with Gemma 4 support, `--model-impl transformers`, or the Qwen 2.5 7B fallback (ADR-0002). Tracked in the project memory.
+
 ## Runtime load — local M4 (stretch goal, MLX example)
 
 ```python
