@@ -51,7 +51,10 @@ class MLXModelClient:
         if self._model is not None:
             return
         try:
-            from mlx_lm import load, sample_utils
+            from pathlib import Path
+
+            from mlx_lm import sample_utils
+            from mlx_lm.utils import load_model, load_tokenizer
         except ImportError as e:
             raise ImportError(
                 "mlx-lm is not installed. Run "
@@ -60,7 +63,20 @@ class MLXModelClient:
             ) from e
 
         logger.info("Loading MLX model from %s", self.model_uri)
-        self._model, self._tokenizer = load(self.model_uri)
+        # We deliberately bypass `mlx_lm.load()` (which forces strict=True) and
+        # call the lower-level loaders with strict=False. Gemma 4 multimodal
+        # checkpoints (Gemma4ForConditionalGeneration) carry redundant
+        # k_proj/v_proj/k_norm weights for the shared-KV layers
+        # (text_config.num_kv_shared_layers=18 in E4B → layers 24-41). mlx-lm's
+        # Gemma 4 implementation correctly omits these from the model graph,
+        # so they are never read at inference. The strict load just rejects
+        # them on principle; relaxing it is safe.
+        model_path = Path(self.model_uri)
+        self._model, config = load_model(model_path, lazy=False, strict=False)
+        self._tokenizer = load_tokenizer(
+            model_path,
+            eos_token_ids=config.get("eos_token_id"),
+        )
         self._sampler = sample_utils
         logger.info("MLX model loaded.")
 

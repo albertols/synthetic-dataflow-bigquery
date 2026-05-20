@@ -105,6 +105,7 @@ If this errors with `safetensors index missing`, the download didn't include `mo
 - **Memory**: E4B FP16 is ~9 GB. On M4 24 GB you have headroom; on M4 16 GB you may need Q4 weights.
 - **No batching**: `MLXModelClient.generate_json(n=k)` calls `mlx_lm.generate` `k` times serially. For real benchmarks, you want vLLM on Dataflow.
 - **Drift from production**: this loop tests the engine + validation chain, NOT the GPU image. After a successful smoke, you still need to push and run on Dataflow before declaring victory.
+- **Gemma 4 E4B from Kaggle is the *multimodal* checkpoint** (`Gemma4ForConditionalGeneration`). Its safetensors carry redundant `k_proj` / `v_proj` / `k_norm` weights for the 18 shared-KV layers (config: `text_config.num_kv_shared_layers=18`); mlx-lm's Gemma 4 implementation omits them from the model graph. `MLXModelClient.setup()` calls `mlx_lm.utils.load_model(..., strict=False)` to accept those extras instead of letting `mlx_lm.load()` reject the checkpoint. The unused weights are never read at inference. This **only** affects M4 smoke — vLLM on Dataflow ingests the same checkpoint differently.
 
 ## When to use which layer
 
