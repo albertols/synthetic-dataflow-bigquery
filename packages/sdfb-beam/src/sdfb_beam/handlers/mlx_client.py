@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -136,6 +138,7 @@ class MLXModelClient:
 
         out: list[dict] = []
         for _ in range(n):
+            t0 = time.perf_counter()
             text = generate(
                 self._model,
                 self._tokenizer,
@@ -144,9 +147,25 @@ class MLXModelClient:
                 sampler=sampler,
                 verbose=False,
             )
+            elapsed = time.perf_counter() - t0
+            n_tok = len(self._tokenizer.encode(text))
+            hit_cap = n_tok >= max_tokens - 1
+            logger.info(
+                "MLX generated %d tok in %.1fs (%.1f tok/s)%s",
+                n_tok,
+                elapsed,
+                n_tok / elapsed if elapsed else 0.0,
+                " [HIT max_tokens — output likely truncated]" if hit_cap else "",
+            )
             payload = self._extract_first_json_object(text)
             if payload is None:
-                logger.warning("MLX output not parseable as JSON; skipping.")
+                logger.warning(
+                    "MLX output not parseable as JSON (chars=%d, hit_cap=%s). "
+                    "Set log level DEBUG to see the raw text.",
+                    len(text),
+                    hit_cap,
+                )
+                logger.debug("Unparseable MLX output:\n%s", text)
                 continue
             out.append(payload)
         return out
@@ -168,21 +187,68 @@ class MLXModelClient:
 
     @staticmethod
     def _extract_first_json_object(text: str) -> dict[str, Any] | None:
-        """Pull the first balanced `{…}` substring out of an LLM response."""
-        start = text.find("{")
-        if start == -1:
-            return None
-        depth = 0
-        for i in range(start, len(text)):
-            ch = text[i]
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    candidate = text[start : i + 1]
-                    try:
-                        return json.loads(candidate)
-                    except json.JSONDecodeError:
-                        return None
+        """Pull the first valid JSON object out of an LLM response.
+
+        Robust to: markdown code fences, leading/trailing prose, braces that
+        appear *inside* string values, and a single retry with trailing commas
+        stripped (a common LLM artifact). Scans left-to-right for balanced
+        `{…}` spans (string-aware) and returns the first that parses to a dict.
+        Returns None if nothing parses (e.g. the output was truncated before
+        the object closed).
+        """
+        n = len(text)
+        i = 0
+        while i < n:
+            if text[i] != "{":
+                i += 1
+                continue
+            # Candidate object start at i. Walk to its balanced close, tracking
+            # string state so that braces inside "..." values don't count.
+            depth = 0
+            in_str = False
+            escaped = False
+            close = -1
+            for j in range(i, n):
+                ch = text[j]
+                if in_str:
+                    if escaped:
+                        escaped = False
+                    elif ch == "\\":
+                        escaped = True
+                    elif ch == '"':
+                        in_str = False
+                    continue
+                if ch == '"':
+                    in_str = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        close = j
+                        break
+            if close == -1:
+                # No balanced close — truncated. No later '{' can do better.
+                return None
+            candidate = text[i : close + 1]
+            parsed = MLXModelClient._loads_lenient(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+            # This span didn't parse to a dict; try the next '{' to the right.
+            i += 1
         return None
+
+    @staticmethod
+    def _loads_lenient(candidate: str) -> Any | None:
+        """`json.loads`, then one retry with trailing commas removed."""
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        # Trailing comma before a closing brace/bracket is the most common
+        # LLM artifact. Only applied after a strict parse already failed.
+        repaired = re.sub(r",(\s*[}\]])", r"\1", candidate)
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            return None

@@ -22,8 +22,12 @@ models:
     expected_vram_gb: 9
     license: gemma-tos
     source: kaggle
+    # MUST be the `-it` (instruction-tuned) variant — the base `gemma-4-e4b`
+    # slug ships no chat_template and won't follow JSON-output instructions.
+    # The IT checkpoint is multimodal (Gemma4ForConditionalGeneration); MLX
+    # needs strict=False on load (see handlers/mlx_client.py).
     download_hint: |
-      kaggle models instances versions download google/gemma-4/transformers/e4b/1
+      kaggle models instances versions download google/gemma-4/transformers/gemma-4-e4b-it/1
 
   gemma4_26b_a4b_awq:
     # M1 §11 primary production target — MoE, Q4-AWQ for single-L4 fit.

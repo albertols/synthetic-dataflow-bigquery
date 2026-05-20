@@ -33,6 +33,7 @@ import json
 import logging
 import random
 import sys
+import time
 from pathlib import Path
 
 from sdfb_beam.handlers.mlx_client import MLXModelClient
@@ -57,16 +58,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--output_dir", default="output",
                    help="Output JSONL goes to <output_dir>/<table>/hello_synthetic_mlx.jsonl")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--verbose", action="store_true",
+                   help="DEBUG logging — surfaces the raw MLX text on parse failure")
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv or sys.argv[1:])
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
         force=True,
     )
-    args = parse_args(argv or sys.argv[1:])
     rng = random.Random(args.seed)
 
     logger.info("Loading DDL from %s", args.ddl_path)
@@ -94,30 +97,43 @@ def main(argv: list[str] | None = None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     valid_count = 0
-    invalid_count = 0
+    parse_fail_count = 0
+    validation_fail_count = 0
+    run_start = time.perf_counter()
     with out_path.open("w") as fout:
         for i in range(args.num_rows):
+            row_start = time.perf_counter()
             anchor = ref_rows[rng.randrange(len(ref_rows))]
             prompt = _build_prompt(anchor, schema.fqn)
             raw = client.generate_json(prompt, record_schema, n=1)
+            row_secs = time.perf_counter() - row_start
             if not raw:
-                invalid_count += 1
-                logger.warning("Row %d: no JSON parsed from MLX output", i)
+                parse_fail_count += 1
+                logger.warning("Row %d: ✗ no JSON parsed (%.1fs)", i, row_secs)
                 continue
             candidate = raw[0]
             try:
                 validated = Record.model_validate(candidate)
                 fout.write(json.dumps(validated.model_dump(mode="json"), default=str) + "\n")
                 valid_count += 1
-                logger.info("Row %d: ✓ valid", i)
+                logger.info("Row %d: ✓ valid (%.1fs)", i, row_secs)
             except Exception as e:
-                invalid_count += 1
-                logger.warning("Row %d: ✗ Pydantic rejected — %s", i, e)
+                validation_fail_count += 1
+                logger.warning("Row %d: ✗ Pydantic rejected (%.1fs) — %s", i, row_secs, e)
                 logger.debug("Rejected payload: %s", candidate)
 
+    total_secs = time.perf_counter() - run_start
+    attempted = args.num_rows
     logger.info("=" * 60)
-    logger.info("Done. %d valid, %d invalid. Output: %s",
-                valid_count, invalid_count, out_path)
+    logger.info(
+        "Done. %d/%d valid | %d parse-fail | %d schema-reject",
+        valid_count, attempted, parse_fail_count, validation_fail_count,
+    )
+    logger.info(
+        "Throughput: %.0fs total, %.1fs/row avg (%d cols/record)",
+        total_secs, total_secs / attempted if attempted else 0.0, len(schema.columns),
+    )
+    logger.info("Output: %s", out_path)
     logger.info("=" * 60)
     return 0
 
