@@ -107,11 +107,29 @@ class MLXModelClient:
         # <end_of_turn>\n<start_of_turn>model\n`). Without it, the model
         # treats input as a raw completion, never emits EOS, and runs to
         # max_tokens.
-        chat_prompt = self._tokenizer.apply_chat_template(
-            [{"role": "user", "content": wrapped_prompt}],
-            add_generation_prompt=True,
-            tokenize=False,
-        )
+        try:
+            chat_prompt = self._tokenizer.apply_chat_template(
+                [{"role": "user", "content": wrapped_prompt}],
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+        except ValueError:
+            # tokenizer_config.json has no chat_template. This usually means
+            # the Kaggle download was the BASE Gemma 4 E4B, not the
+            # instruction-tuned variant (`-it`). Base models don't follow
+            # instructions, so JSON output quality will be poor even with
+            # the hardcoded template. Pull the IT variant before declaring
+            # smoke success.
+            logger.warning(
+                "Tokenizer has no chat_template — falling back to the "
+                "hardcoded Gemma template. This is likely the BASE model; "
+                "pull the `-it` variant from Kaggle for usable output."
+            )
+            chat_prompt = (
+                "<start_of_turn>user\n"
+                f"{wrapped_prompt}<end_of_turn>\n"
+                "<start_of_turn>model\n"
+            )
         # mlx-lm ≥0.20 routes sampling params through a sampler callable
         # instead of accepting temp= directly on generate().
         sampler = self._sampler.make_sampler(temp=temperature)
