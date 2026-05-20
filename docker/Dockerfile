@@ -14,39 +14,38 @@
 #   https://cloud.google.com/dataflow/docs/guides/build-container-image
 #   https://docs.vllm.ai/en/latest/getting_started/installation.html
 #
-# ADR-0009 (single image, two entrypoint paths) and ADR-0008 (CI-driven build)
-# carry the locked decisions.
-
-# ---------------------------------------------------------------------------
-# Base images — ALL pulled from corporate JFrog (ARC build runners cannot
-# reach Docker Hub or gcr.io). Refs are build-args so CI injects the exact
-# JFrog paths; the defaults below are best-guesses — confirm the precise
-# pull strings with the platform team. See ADR 0012.
+# ADR-0009 (single image, two entrypoint paths), ADR-0008 (CI-driven build),
+# ADR-0012 (enterprise network constraints) carry the locked decisions.
 #
-#   CUDA:     com/db/awp/cuda  tag 12.2.2-cudnn-runtime-ubuntu22.04
-#   Beam SDK: dkr-io/apache/beam_python3.11_sdk:2.71.0 (only ver in JFrog →
-#             apache-beam pinned ==2.71.0 in packages/sdfb-beam/pyproject.toml)
+# Architecture strategy:
+#   The JFrog CUDA images (com/db/awp/cuda/*) are arm64-only → unusable for
+#   amd64 Dataflow workers. Instead we use the Beam SDK image (proven amd64)
+#   as the base. vLLM/torch wheels bundle their own CUDA runtime libs
+#   (libcudart, libnccl, etc.); the NVIDIA *driver* is provided at runtime
+#   by Dataflow's `install-nvidia-driver` experiment (mounted at
+#   /usr/local/nvidia/). No system CUDA install needed in the image.
+#
+# Base images:
+#   Beam SDK: dkr-public-local/dkr-io/apache/beam_python3.11_sdk:2.71.0
+#     → amd64, Debian-based, Python 3.11, /opt/apache/beam/boot included
+#     → apache-beam pinned ==2.71.0 to match (see ADR 0012)
 #   Launcher: gcr.io/dataflow-templates-base/python311-template-launcher-base
-#             — MIRROR to JFrog if gcr.io is unreachable from ARC runners.
+#     → only /opt/google/dataflow/python_template_launcher is copied from it
 # ---------------------------------------------------------------------------
+
 ARG ARTIFACTORY_HOSTNAME_ARG="artifactory.sdlc.ctl.gcp.db.com"
-ARG CUDA_IMAGE="${ARTIFACTORY_HOSTNAME_ARG}/com/db/awp/cuda:12.2.2-cudnn-runtime-ubuntu22.04"
-ARG BEAM_SDK_IMAGE="${ARTIFACTORY_HOSTNAME_ARG}/dkr-io/apache/beam_python3.11_sdk:2.71.0"
+ARG BEAM_SDK_IMAGE="${ARTIFACTORY_HOSTNAME_ARG}/dkr-public-local/dkr-io/apache/beam_python3.11_sdk:2.71.0"
 ARG LAUNCHER_IMAGE="gcr.io/dataflow-templates-base/python311-template-launcher-base"
 
-# Stage 1 — Beam SDK worker boot (version-matched to apache-beam==2.71.0).
-FROM ${BEAM_SDK_IMAGE} AS beam_sdk
-
-# Stage 2 — Python Flex Template launcher source layer.
+# ---------------------------------------------------------------------------
+# Stage 1 — Flex Template launcher (just need the binary).
+# ---------------------------------------------------------------------------
 FROM ${LAUNCHER_IMAGE} AS flex_launcher
 
 # ---------------------------------------------------------------------------
-# Stage 3 — CUDA + cuDNN runtime base + Python 3.11 + uv-installed workspace.
-# The NVIDIA driver is NOT baked in: Dataflow's `install-nvidia-driver`
-# installs it on the host VM and mounts it at /usr/local/nvidia/. The model
-# warm-pull uses the google-cloud-storage Python client (no gcloud CLI).
+# Stage 2 — Final image: Beam SDK base (amd64, Python 3.11, has /opt/apache/beam).
 # ---------------------------------------------------------------------------
-FROM ${CUDA_IMAGE}
+FROM ${BEAM_SDK_IMAGE}
 
 ARG ENV_NAME_ARG="unset"
 ARG ARTIFACTORY_HOSTNAME_ARG="unset"
@@ -64,40 +63,27 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ARTIFACTORY_RELEASER_USERNAME=$ARTIFACTORY_RELEASER_USERNAME_ARG \
     ARTIFACTORY_RELEASER_PASSWORD=$ARTIFACTORY_RELEASER_PWD_ARG
 
-# System deps from the INTERNAL apt mirror only — no PPA, no gcr.io, no
-# packages.cloud.google.com. If the mirror lacks python3.11 (Ubuntu 22.04
-# ships 3.10), fall back to uv-managed Python via UV_PYTHON_INSTALL_MIRROR
-# pointed at a JFrog generic repo. See ADR 0012.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.11 python3.11-venv python3.11-dev python3-pip \
-        ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+# Overlay Flex Template launcher from GCR image.
+# /opt/apache/beam is already in the Beam SDK base — no need to copy it.
+COPY --from=flex_launcher /opt/google/dataflow/python_template_launcher /opt/google/dataflow/python_template_launcher
 
-# Overlay Beam SDK worker bits + Flex Template launcher.
-COPY --from=beam_sdk      /opt/apache/beam                                /opt/apache/beam
-COPY --from=flex_launcher /opt/google/dataflow/python_template_launcher   /opt/google/dataflow/python_template_launcher
-
-# Bootstrap uv from the JFrog pypi mirror (pyproject's [[tool.uv.index]]
-# resolves the rest of the dependency tree from the same mirror).
-RUN pip3 install --no-cache-dir \
+# Bootstrap uv from the JFrog pypi mirror.
+RUN pip install --no-cache-dir \
         --index-url "https://${ARTIFACTORY_HOSTNAME_ARG}/artifactory/api/pypi/pypi-all/simple" \
         uv
 
 WORKDIR /workspace
 
-# Layer-cache strategy: pyprojects + lockfile + requirements first.
+# Layer-cache strategy: pyprojects + lockfile first.
 COPY pyproject.toml uv.lock README.md ./
 COPY packages/sdfb-core/pyproject.toml packages/sdfb-core/pyproject.toml
 COPY packages/sdfb-beam/pyproject.toml packages/sdfb-beam/pyproject.toml
 COPY packages/sdfb-tests/pyproject.toml packages/sdfb-tests/pyproject.toml
 
-# `uv sync --frozen --no-dev` installs into /workspace/.venv. The Flex
-# Template launcher does NOT re-install requirements at job start: we
-# deliberately leave FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE *unset* so the
-# launcher skips its built-in `pip install -r` step and uses the venv we
-# baked in. This avoids both startup latency and double-install conflicts.
+# Install all deps. vLLM/torch wheels include bundled CUDA runtime libs —
+# no system CUDA needed. The NVIDIA driver is mounted by Dataflow at runtime.
+# FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE intentionally UNSET so the launcher
+# skips re-install and uses this pre-baked venv.
 RUN uv sync --frozen --no-dev --all-packages \
         --extra gpu --extra embedding --extra library
 
@@ -105,13 +91,13 @@ RUN uv sync --frozen --no-dev --all-packages \
 COPY packages/sdfb-core/src packages/sdfb-core/src
 COPY packages/sdfb-beam/src packages/sdfb-beam/src
 
-# The .venv site-packages already has sdfb-core / sdfb-beam installed via uv;
-# adding the source roots is belt + suspenders for `save_main_session=False`
-# pickling that the worker performs.
 ENV PYTHONPATH="/workspace/.venv/lib/python3.11/site-packages:/workspace/packages/sdfb-core/src:/workspace/packages/sdfb-beam/src"
+
+# NVIDIA driver mount point (populated by Dataflow's install-nvidia-driver).
+ENV LD_LIBRARY_PATH="/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}" \
+    PATH="/usr/local/nvidia/bin:${PATH}"
 
 # Flex Template launcher contract.
 ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/workspace/packages/sdfb-beam/src/sdfb_beam/cli/run_pipeline.py"
-# FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE INTENTIONALLY UNSET — see uv sync comment above.
 
 ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
