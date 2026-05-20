@@ -33,7 +33,8 @@
       "Bash(.venv/bin/python -m py_compile scripts/hello_synthetic_mlx.py packages/sdfb-beam/src/sdfb_beam/handlers/mlx_client.py)",
       "Bash(.venv/bin/python *)",
       "Bash(git ls-tree *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(gh api *)"
     ]
   }
 }
