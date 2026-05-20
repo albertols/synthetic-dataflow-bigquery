@@ -66,6 +66,15 @@ uv sync --group dev
 
 One-time ~2–3 min on first install, ~600 MB on disk. Installs `sdfb-core` + `sdfb-beam[gcp]` + `sdfb-tests` + dev tools (ruff, mypy, pytest, hypothesis). Creates `.venv/` at the repo root.
 
+> **JFrog index**: `pyproject.toml` pins the default index to
+> `https://artifactory.sdlc.ctl.gcp.db.com/artifactory/api/pypi/pypi-all/simple`
+> ([`tool.uv.index`](../pyproject.toml)). On the corp network, direct
+> `pypi.org` / `files.pythonhosted.org` are blocked — uv reads through
+> the JFrog mirror instead. If the mirror requires auth, export
+> `UV_INDEX_JFROG_PYPI_ALL_USERNAME` and `UV_INDEX_JFROG_PYPI_ALL_PASSWORD`
+> before running `uv sync` (the standard Artifactory user + identity
+> token from the "Set Me Up" dialog).
+
 If you ever see `ModuleNotFoundError: No module named 'sdfb_core'` after a sync, it means the workspace members weren't installed (e.g. someone removed `sdfb-tests` from the root `dev` group). Quick fix: `uv sync --all-packages --group dev`.
 
 To install the optional extras later (only needed when you start working on the GPU / RAG / library pieces):
