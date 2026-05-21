@@ -16,10 +16,10 @@ Single source of truth for milestone scope. Locked decisions per milestone live 
 | 6 | B.2 library-wrapper engine (sdgx; bake-off deferred, ADR 0013) | ✅ done | laptop |
 | 7 | B.1 RAG engine (FAISS retrieval + distribution inference) | ✅ done | laptop |
 | 8 | Beam DAG end-to-end on DirectRunner + `FakeModelClient` | ✅ done | laptop |
-| 9 | vLLM `ModelHandler` + `ModelClient` | 🔒 pending | M4 |
+| 9 | vLLM `ModelHandler` + `ModelClient` | ✅ done | laptop (mock-tested; real run in §11) |
 | 10 | `docker/Dockerfile` + CI workflows | ✅ done | CI |
 | 11 | E2E Dataflow run: Gemma 4 E4B → 26B-A4B MoE | 🔒 pending | M4 |
-| 12 | `thresholds.yml` wiring + `validation_runs` BQ table | 🔒 pending | M4 |
+| 12 | `thresholds.yml` wiring + `validation_runs` BQ table | ✅ done | laptop (DirectRunner; BQ write verified in §11) |
 
 **Hard constraints (immutable for M1)** — see [`adr/0001-no-managed-gcp-services.md`](adr/0001-no-managed-gcp-services.md):
 - No Vertex AI, Dataplex, Looker.

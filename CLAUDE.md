@@ -74,10 +74,10 @@ Import direction is **strict**: `sdfb-beam` depends on `sdfb-core`, never the ot
 
 Full milestone table: [`docs/ROADMAP.md`](docs/ROADMAP.md). Snapshot of M1:
 
-- ✅ §1 Bootstrap · ✅ §2 Contracts · ✅ §3 DDL extractor · ✅ §4 Fake client · ✅ §5 Engine ABC · ✅ §6 B.2 engine · ✅ §7 B.1 engine · ✅ §8 Beam DAG · ✅ §10 `docker/Dockerfile` + CI workflows
-- 🔒 §9 vLLM handler (stub) · §11 E2E Dataflow · §12 thresholds + validation_runs
+- ✅ §1 Bootstrap · ✅ §2 Contracts · ✅ §3 DDL extractor · ✅ §4 Fake client · ✅ §5 Engine ABC · ✅ §6 B.2 engine · ✅ §7 B.1 engine · ✅ §8 Beam DAG · ✅ §9 vLLM `ModelClient` (mock-tested) · ✅ §10 `docker/Dockerfile` + CI workflows · ✅ §12 thresholds gate + `validation_runs` writer
+- 🔒 §11 E2E Dataflow run (Gemma 4 on L4) — needs M4 + GCP
 
-The laptop side of M1 is done; the rest needs M4 + GCP. See [`docs/M4_SETUP.md`](docs/M4_SETUP.md) for onboarding.
+The laptop side of M1 is done; only the §11 E2E Dataflow run needs M4 + GCP. See [`docs/M4_SETUP.md`](docs/M4_SETUP.md) for onboarding.
 
 ## Anti-patterns — do not do these
 
