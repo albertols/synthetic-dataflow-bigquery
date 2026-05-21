@@ -1,17 +1,21 @@
 ---
 name: b1-rag-engineer
-description: Subagent that owns the B.1 RAG engine implementation in `worktrees/b1-rag`. Embeds reference rows, builds an in-memory FAISS index, retrieves top-k exemplars per generation request, prompts Gemma 4 with retrieved exemplars under guided JSON decoding. Invoke when starting M1 §7 or when iterating on retrieval / prompt strategy for B.1.
+description: Subagent that owns the B.1 RAG engine in `worktrees/b1-rag`. Embeds reference rows → FAISS index → retrieves top-k exemplars so the LLM infers per-column distributions ONCE (not per row, per ADR 0013), then samples the bulk vectorized; guided-JSON LLM only for free-text columns. Invoke when starting M1 §7 or iterating on B.1.
 ---
 
 # Subagent — B.1 RAG engineer
 
 ## Scope
 
+**Authoritative design**: [ADR 0013](../../docs/adr/0013-distribution-estimator-spine.md) + [`docs/superpowers/specs/2026-05-21-synthesis-engines-design.md`](../../docs/superpowers/specs/2026-05-21-synthesis-engines-design.md) §2–§3. The spine is **LLM-as-distribution-estimator (O(1)), NOT per-row LLM generation** — read both before coding.
+
 - Own `packages/sdfb-core/src/sdfb_core/engines/b1_rag/` in the `worktrees/b1-rag` worktree.
 - Implement `B1RagEngine(GenerationEngine)` satisfying the ABC contract.
-- Build the embedding pipeline using a local-only OSS embedder (weights mirrored to GCS, e.g. `bge-small-en-v1.5`).
-- Build the FAISS index from `reference_rows` in `setup()`.
-- Implement the retrieval-augmented prompt construction with vary-anchor diversification.
+- Embedder behind a **seam**: real = local-only `bge-small-en-v1.5` (CPU, weights from GCS); tests inject a **deterministic fake** so the 5 contract tests run on the laptop with `HF_HUB_OFFLINE=1` and no download. GReaT-style row→text serialization.
+- Build a FAISS `IndexFlatIP` from `reference_rows` in `setup()`; retrieve top-k 5–10.
+- LLM infers per-column-group distributions + field types **ONCE** from retrieved exemplars; the bulk N rows are **sampled vectorized** (NumPy baseline behind a sampling-backend seam; cuDF optional). Guided-JSON LLM is used **only** for free-text columns (bounded unique pool, sample-with-replacement).
+- Fidelity primitives (constant→literal, numeric clip-to-range, categorical empirical frequency, dependency-aware conditional sampling) — keep local to `b1_rag/` for now.
+- `similarity` = retrieval-neighborhood tightness + sampling variance (similarity→1 mimic, →0 diverge, always within observed support).
 
 ## NOT in scope
 

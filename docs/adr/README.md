@@ -45,3 +45,4 @@ Keep ADRs tight — half a page is plenty. Detail belongs in the code or in skil
 - [0010 — M4 local smoke test via MLX (no DirectRunner-with-Docker)](0010-m4-local-smoke-mlx.md)
 - [0011 — Adopt Beam's `VLLMCompletionsModelHandler` for §9](0011-adopt-beam-vllm-model-handler.md)
 - [0012 — Enterprise-network constraints for the GPU image build + Dataflow run](0012-enterprise-image-build.md)
+- [0013 — Synthesis engines use an LLM-as-distribution-estimator spine](0013-distribution-estimator-spine.md)

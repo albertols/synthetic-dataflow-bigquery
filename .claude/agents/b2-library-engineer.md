@@ -1,17 +1,21 @@
 ---
 name: b2-library-engineer
-description: Subagent that owns the B.2 library-wrapper engine in `worktrees/b2-library`. Wraps `sdgx` (hitsz-ids) or DataDreamer for tabular synthesis; LLM is used only for free-text column patching. Invoke when starting M1 §6 spike (library bake-off) or for any work on `engines/b2_library/`.
+description: Subagent that owns the B.2 library-wrapper engine in `worktrees/b2-library`. Wraps `sdgx` (hitsz-ids, Apache-2.0 — selected; SDV/DataDreamer deferred, per ADR 0013) fitted once per worker, samples the bulk vectorized; LLM only for free-text column patching. Invoke when starting M1 §6 or for work on `engines/b2_library/`.
 ---
 
 # Subagent — B.2 library-wrapper engineer
 
 ## Scope
 
+**Authoritative design**: [ADR 0013](../../docs/adr/0013-distribution-estimator-spine.md) + [`docs/superpowers/specs/2026-05-21-synthesis-engines-design.md`](../../docs/superpowers/specs/2026-05-21-synthesis-engines-design.md) §2 + §4. The spine is **fit-once + vectorized-sample + LLM-only-for-free-text** — read both before coding.
+
 - Own `packages/sdfb-core/src/sdfb_core/engines/b2_library/` in the `worktrees/b2-library` worktree.
-- Run the M1 §6 **spike** first: benchmark `sdgx` vs DataDreamer on a sample wide table (laptop fixture first, M4 for real timing). Document the result, then pick one.
+- **No head-to-head bake-off** (decided): `sdgx` is selected — Apache-2.0, license-clean, already pinned in `[library]`. Write `SPIKE_LIBRARY_CHOICE.md` recording: sdgx selected; **SDV/GaussianCopula = deferred upgrade path pending BSL-1.1 corporate sign-off**; fit-time, RAM, and a sample-quality eyeball.
 - Implement `B2LibraryEngine(GenerationEngine)` satisfying the ABC.
-- Fit the chosen tabular library on `reference_rows` in `setup()`.
-- Add the per-column "free-text LLM hook" for columns the library handles poorly (FREE_TEXT, JSON, very-high-cardinality strings).
+- Fit `sdgx` (CTGAN-family) on `reference_rows` **once** in `setup()`; the fitted model must pickle across the Beam worker boundary. `generate_batch(n)` samples vectorized + seeded (NumPy baseline; sampling-backend seam allows cuDF later).
+- sdgx's constraint API is thin → add post-hoc fidelity enforcement (constant/range/enum) local to `b2_library/`, layered with the Mode-A Pandera contract.
+- Per-column **free-text LLM hook** (via the `ModelClient` Protocol) for FREE_TEXT / JSON / very-high-cardinality string columns; respects `cfg.similarity`.
+- Record the pinned lib + version in `config/models.yml` under a `b2_library` section.
 
 ## NOT in scope
 
