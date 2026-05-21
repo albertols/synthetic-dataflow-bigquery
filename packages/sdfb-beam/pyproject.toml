@@ -34,6 +34,10 @@ gpu = [
     # inside the GPU container anyway (the M4 spike is not viable; ADR 0010).
     "vllm>=0.21.0; sys_platform == 'linux'",
     "torch>=2.4.0; sys_platform == 'linux'",
+    # VLLMModelClient owns the vLLM OpenAI server directly (ADR 0014) + talks
+    # to it via the openai client, so openai is an explicit dep (not a
+    # transitive pull from Beam's handler). Linux-only; laptop tests mock it.
+    "openai>=1.40.0; sys_platform == 'linux'",
 ]
 # B.1 RAG engine — local-only embedder (weights mirrored to GCS, no HF Hub).
 embedding = [
