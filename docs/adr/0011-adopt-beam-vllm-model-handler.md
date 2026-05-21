@@ -1,6 +1,6 @@
 # ADR 0011 — Adopt Beam's `VLLMCompletionsModelHandler` for §9
 
-- **Status**: accepted (2026-05-20)
+- **Status**: accepted (2026-05-20) — **amended by [ADR 0014](0014-vllm-model-client-owns-server.md)** (2026-05-21): the client owns the vLLM OpenAI server directly + uses the chat endpoint, rather than Beam's RunInference handler.
 
 ## Context
 
