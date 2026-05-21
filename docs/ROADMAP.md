@@ -13,8 +13,8 @@ Single source of truth for milestone scope. Locked decisions per milestone live 
 | 3 | DDL extractor `sdfb_beam/ddl/` | ✅ done | laptop |
 | 4 | `FakeModelClient` + fixtures | ✅ done | laptop |
 | 5 | `GenerationEngine` ABC + 5 contract tests | ✅ done | laptop |
-| 6 | B.2 library-wrapper engine + spike (sdgx vs DataDreamer) | 🔒 pending | M4 |
-| 7 | B.1 RAG engine | 🔒 pending | M4 |
+| 6 | B.2 library-wrapper engine (sdgx; bake-off deferred, ADR 0013) | ✅ done | laptop |
+| 7 | B.1 RAG engine (FAISS retrieval + distribution inference) | ✅ done | laptop |
 | 8 | Beam DAG end-to-end on DirectRunner + `FakeModelClient` | ✅ done | laptop |
 | 9 | vLLM `ModelHandler` + `ModelClient` | 🔒 pending | M4 |
 | 10 | `docker/Dockerfile` + CI workflows | ✅ done | CI |

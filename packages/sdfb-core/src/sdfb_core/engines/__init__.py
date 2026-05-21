@@ -65,3 +65,14 @@ __all__ = [
     "get_engine",
     "register_engine",
 ]
+
+# ---------------------------------------------------------------------------
+# Auto-register the bundled engines. Importing each subpackage fires its
+# `register_engine(...)`, so `get_engine("b1_rag" | "b2_library")` resolves
+# wherever `sdfb_core.engines` is imported (pipeline driver, CLI, tests) — not
+# only when a test imports the subpackage directly. Imports live at the BOTTOM
+# (after `register_engine` is defined) to avoid a circular import; the engines'
+# heavy deps (faiss / sdgx) stay deferred inside them.
+# ---------------------------------------------------------------------------
+from sdfb_core.engines import b1_rag as _b1_rag  # noqa: E402, F401
+from sdfb_core.engines import b2_library as _b2_library  # noqa: E402, F401

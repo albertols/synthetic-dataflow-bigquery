@@ -74,8 +74,8 @@ Import direction is **strict**: `sdfb-beam` depends on `sdfb-core`, never the ot
 
 Full milestone table: [`docs/ROADMAP.md`](docs/ROADMAP.md). Snapshot of M1:
 
-- ✅ §1 Bootstrap · ✅ §2 Contracts · ✅ §3 DDL extractor · ✅ §4 Fake client · ✅ §5 Engine ABC · ✅ §8 Beam DAG · ✅ §10 `docker/Dockerfile` + CI workflows
-- 🔒 §6 B.2 engine · §7 B.1 engine · §9 vLLM handler (stub) · §11 E2E Dataflow · §12 thresholds + validation_runs
+- ✅ §1 Bootstrap · ✅ §2 Contracts · ✅ §3 DDL extractor · ✅ §4 Fake client · ✅ §5 Engine ABC · ✅ §6 B.2 engine · ✅ §7 B.1 engine · ✅ §8 Beam DAG · ✅ §10 `docker/Dockerfile` + CI workflows
+- 🔒 §9 vLLM handler (stub) · §11 E2E Dataflow · §12 thresholds + validation_runs
 
 The laptop side of M1 is done; the rest needs M4 + GCP. See [`docs/M4_SETUP.md`](docs/M4_SETUP.md) for onboarding.
 
