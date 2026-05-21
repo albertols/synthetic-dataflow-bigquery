@@ -27,6 +27,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import apache_beam as beam
+import sdfb_core.engines  # noqa: F401  populates ENGINE_REGISTRY at import time
 from apache_beam.io.filesystems import FileSystems
 from apache_beam.io.gcp.bigquery import BigQueryDisposition, WriteToBigQuery
 from apache_beam.options.pipeline_options import (
@@ -34,12 +35,10 @@ from apache_beam.options.pipeline_options import (
     PipelineOptions,
     StandardOptions,
 )
-
-import sdfb_core.engines  # noqa: F401  populates ENGINE_REGISTRY at import time
+from sdfb_core.contracts import TableSchema
 
 from sdfb_beam.io.bq_sources import load_reference_rows
 from sdfb_beam.pipeline import PipelineConfig, build_pipeline
-from sdfb_core.contracts import TableSchema
 
 if TYPE_CHECKING:
     from sdfb_core.engines import ModelClient
@@ -66,12 +65,15 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
                    help="Engine name registered in ENGINE_REGISTRY")
     p.add_argument("--model_uri", required=True,
                    help="gs://<bucket>/synthetic/models/<family>/<model>/<version>/")
+    p.add_argument("--embedder_uri", default="",
+                   help="gs://<bucket>/synthetic/models/embedders/<model>/<version>/ "
+                        "for the B.1 RAG embedder (optional; empty → HashingEmbedder)")
     p.add_argument("--client_type", default="vllm",
                    choices=["vllm", "mlx", "fake"])
     return p.parse_known_args(argv)
 
 
-def build_model_client(client_type: str, model_uri: str) -> "ModelClient":
+def build_model_client(client_type: str, model_uri: str) -> ModelClient:
     """Lazy factory — avoids importing vLLM / MLX on machines that don't have them."""
     if client_type == "fake":
         from sdfb_beam.handlers.fake_client import FakeModelClient
@@ -132,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
         batch_size=args.batch_size,
         similarity=args.similarity,
         run_id=args.run_id,
+        model_uri=args.model_uri,
+        embedder_uri=args.embedder_uri,
     )
 
     landing_sink = WriteToBigQuery(

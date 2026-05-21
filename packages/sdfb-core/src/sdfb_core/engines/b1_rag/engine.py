@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING
 
 from sdfb_core.codegen import derive_record_model
 from sdfb_core.engines.b1_rag._fidelity import ColumnSampler, numpy_available
-from sdfb_core.engines.b1_rag.embedder import Embedder, HashingEmbedder
+from sdfb_core.engines.b1_rag.embedder import BgeEmbedder, Embedder, HashingEmbedder
 from sdfb_core.engines.b1_rag.index import build_index
 from sdfb_core.engines.b1_rag.profile import (
     ColumnKind,
@@ -109,7 +109,15 @@ class B1RagEngine(GenerationEngine):
         }
 
         # 1+2. embed + index (only meaningful with reference rows present).
-        self._embedder = self._injected_embedder or HashingEmbedder(dim=384)
+        # Embedder precedence: injected (tests) > real BgeEmbedder if the
+        # context carries a (worker-local) embedder path > dependency-free
+        # HashingEmbedder default (bare laptop / contract tests).
+        if self._injected_embedder is not None:
+            self._embedder = self._injected_embedder
+        elif ctx.embedder_uri:
+            self._embedder = BgeEmbedder(ctx.embedder_uri)
+        else:
+            self._embedder = HashingEmbedder(dim=384)
         if ctx.reference_rows:
             texts = serialize_rows(ctx.reference_rows, self._column_order)
             self._ref_vectors = self._embedder.embed(texts)

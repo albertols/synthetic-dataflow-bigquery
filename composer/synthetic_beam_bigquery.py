@@ -5,11 +5,22 @@ it at deploy time to substitute build-time values. Runtime values
 (table_fqn, num_rows, run_id) come from Airflow DAG params and Composer
 Variables — operators don't need to re-import the DAG to change them.
 
-Substitution markers:
-  {{PROJECT_VERSION}}     project version of the sdfb-beam package being deployed
-  {{DAG_VERSION}}         {{PROJECT_VERSION}}_<ISO timestamp> (unique DAG id)
-  {{ENV}}                 dev | uat | prd
-  {{EXECUTION_DATES}}     (reserved, unused for batch synthetic)
+Substitution markers (workflow 3 seds these at import time):
+  {{PROJECT_VERSION}}         project version of the sdfb-beam package being deployed
+  {{DAG_VERSION}}             {{PROJECT_VERSION}}_<ISO timestamp> (unique DAG id)
+  {{ENV}}                     dev | uat | prd
+  {{GCS_DATAFLOW_STAGING}}    db-<env>-…-dataflow-staging bucket name
+  {{GCS_DATAFLOW_TEMPLATES}}  db-<env>-…-dataflow-templates bucket name
+  {{SDFB_MODEL_URI}}          gs://<bucket>/synthetic/models/gemma4/…
+  {{SDFB_EMBEDDER_URI}}       gs://<bucket>/synthetic/models/embedders/… (B.1; empty ⇒ HashingEmbedder)
+  {{SDFB_DEFAULT_TABLE_FQN}}  project.dataset.table
+  {{SDFB_DDL_URI}}            gs://…/ddl.json
+  {{SDFB_LANDING_TABLE}}      project.synthetic_data.landing
+  {{SDFB_DLQ_TABLE}}          project.synthetic_data_quality.dlq
+
+Runtime values: Airflow DAG params ({{ params.* }}: table_fqn, num_rows,
+engine, batch_size, similarity) + Composer Variables for infra (PROJECT_ID,
+REGION, DATAFLOW_SUBNET, SA_DATAFLOW) — changeable without re-importing.
 
 Network tag literals (devnetproxy / netsegcloudegress / artifactory / gke /
 dataflow) are copied verbatim from the pe-btr-producer-scala-beam mediation
@@ -27,18 +38,21 @@ from airflow.providers.google.cloud.operators.dataflow import (
 from airflow.utils.dates import days_ago
 
 # -----------------------------------------------------------------------------
-# Environment-resolved values — populated from Composer Variables.
-# Set these once per Composer env via `gcloud composer environments update
-# … --update-airflow-configs` or the Composer UI.
+# Build-time values — sed-substituted by workflow 3 at import (see docstring).
 # -----------------------------------------------------------------------------
-bucket_path = Variable.get("GCS_SYNTHETIC_DATAFLOW_STAGING")     # …-dataflow-staging
-templates_path = Variable.get("GCS_SYNTHETIC_DATAFLOW_TEMPLATES")  # …-dataflow-templates
+bucket_path = "{{GCS_DATAFLOW_STAGING}}"        # …-dataflow-staging
+templates_path = "{{GCS_DATAFLOW_TEMPLATES}}"   # …-dataflow-templates
+model_uri = "{{SDFB_MODEL_URI}}"                # gs://<bucket>/synthetic/models/gemma4/e4b-it/v1/
+embedder_uri = "{{SDFB_EMBEDDER_URI}}"          # B.1 embedder; empty ⇒ HashingEmbedder
+default_table_fqn = "{{SDFB_DEFAULT_TABLE_FQN}}"
+
+# -----------------------------------------------------------------------------
+# Runtime infra — Composer Variables, set once per env (not build-time-baked).
+# -----------------------------------------------------------------------------
 project_id = Variable.get("PROJECT_ID")
 region = Variable.get("REGION")
 subnetwork = Variable.get("DATAFLOW_SUBNET")
 service_account = Variable.get("SA_DATAFLOW")
-model_uri = Variable.get("SDFB_MODEL_URI")  # e.g. gs://<bucket>/synthetic/models/gemma4/e4b-it/v1/ (set per-env)
-default_table_fqn = Variable.get("SDFB_DEFAULT_TABLE_FQN")
 
 # -----------------------------------------------------------------------------
 # Build-time substituted constants (replaced by sed in workflow 3).
@@ -140,17 +154,18 @@ with models.DAG(
                     "workerRegion": region,
                 },
                 "parameters": {
-                    "ddl_uri": "{{ var.value.SDFB_DDL_URI }}",
+                    "ddl_uri": "{{SDFB_DDL_URI}}",
                     "reference_table": "{{ params.table_fqn }}",
                     "reference_rows_limit": "10000",
-                    "landing_table": "{{ var.value.SDFB_LANDING_TABLE }}",
-                    "dlq_table": "{{ var.value.SDFB_DLQ_TABLE }}",
+                    "landing_table": "{{SDFB_LANDING_TABLE}}",
+                    "dlq_table": "{{SDFB_DLQ_TABLE}}",
                     "num_rows": "{{ params.num_rows }}",
                     "batch_size": "{{ params.batch_size }}",
                     "similarity": "{{ params.similarity }}",
                     "run_id": "{{ dag_run.run_id }}",
                     "engine": "{{ params.engine }}",
                     "model_uri": model_uri,
+                    "embedder_uri": embedder_uri,
                     "client_type": "vllm",
                 },
             }

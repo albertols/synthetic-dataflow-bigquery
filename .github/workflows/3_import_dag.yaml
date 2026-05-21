@@ -26,6 +26,11 @@ on:
         description: "GCS URI to the model weights (e.g. gs://the-gcs-bucket/synthetic/models/gemma4/e4b-it/v1)"
         required: true
         default: "gs://the-gcs-bucket/synthetic/models/gemma4/e4b-it/v1"
+      embedder_uri:
+        type: string
+        description: "GCS URI to the B.1 RAG embedder (empty ⇒ HashingEmbedder)"
+        required: false
+        default: "gs://the-gcs-bucket/synthetic/models/embedders/bge-small-en-v1.5/v1"
       default_table_fqn:
         type: string
         description: "Default BigQuery table FQN (the-dev-project.synthetic_data.default_table)"
@@ -163,22 +168,30 @@ jobs:
 
       - name: "Substitute build-time placeholders"
         run: |
-          # Only PROJECT_VERSION / DAG_VERSION / ENV are baked in at import time
-          # — those are the only {{...}} markers the DAG actually contains.
-          # Model URI, DDL URI, table FQNs and bucket paths are read at RUNTIME
-          # from Composer Variables (Variable.get / {{ var.value.* }} in the DAG)
-          # and must be set out-of-band per env — this workflow has no
-          # gcloud-composer perms to set them. The workflow_dispatch inputs above
-          # document the expected Variable values (SDFB_MODEL_URI, SDFB_DDL_URI,
-          # SDFB_LANDING_TABLE, SDFB_DLQ_TABLE, SDFB_DEFAULT_TABLE_FQN,
-          # GCS_SYNTHETIC_DATAFLOW_STAGING, GCS_SYNTHETIC_DATAFLOW_TEMPLATES, …).
+          # The DAG is a template: every {{MARKER}} is sed-substituted here at
+          # import. GCS bucket names are derived from env; SDFB_* values come
+          # from the workflow_dispatch inputs. Operational knobs (table_fqn,
+          # num_rows, engine, batch_size, similarity) stay as runtime Airflow
+          # {{ params.* }}, and infra (PROJECT_ID / REGION / DATAFLOW_SUBNET /
+          # SA_DATAFLOW) stays as Composer Variables — both changeable without
+          # re-importing the DAG.
+          GCS_STAGING="db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging"
+          GCS_TEMPLATES="the-gcs-template-path"
           sed -i \
             -e "s|{{PROJECT_VERSION}}|${PROJECT_VERSION}|g" \
             -e "s|{{DAG_VERSION}}|${DAG_VERSION}|g" \
             -e "s|{{ENV}}|${ENV_NAME}|g" \
+            -e "s|{{GCS_DATAFLOW_STAGING}}|${GCS_STAGING}|g" \
+            -e "s|{{GCS_DATAFLOW_TEMPLATES}}|${GCS_TEMPLATES}|g" \
+            -e "s|{{SDFB_MODEL_URI}}|${{ inputs.model_uri }}|g" \
+            -e "s|{{SDFB_EMBEDDER_URI}}|${{ inputs.embedder_uri }}|g" \
+            -e "s|{{SDFB_DEFAULT_TABLE_FQN}}|${{ inputs.default_table_fqn }}|g" \
+            -e "s|{{SDFB_DDL_URI}}|${{ inputs.ddl_uri }}|g" \
+            -e "s|{{SDFB_LANDING_TABLE}}|${{ inputs.landing_table }}|g" \
+            -e "s|{{SDFB_DLQ_TABLE}}|${{ inputs.dlq_table }}|g" \
             composer/synthetic_beam_bigquery.py
-          echo "--- substituted DAG (first 60 lines) ---"
-          head -60 composer/synthetic_beam_bigquery.py
+          echo "--- substituted DAG (first 75 lines) ---"
+          head -75 composer/synthetic_beam_bigquery.py
 
       - name: "Import DAG into Composer"
         run: |

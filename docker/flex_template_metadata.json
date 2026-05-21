@@ -68,8 +68,15 @@
     {
       "name": "model_uri",
       "label": "Model URI",
-      "helpText": "gs://<project>-models/<family>/<model>/<version>/.",
+      "helpText": "gs://<bucket>/synthetic/models/<family>/<model>/<version>/.",
       "regexes": ["^gs://[^/]+/.+/$"]
+    },
+    {
+      "name": "embedder_uri",
+      "label": "Embedder URI (B.1 RAG)",
+      "helpText": "gs://<bucket>/synthetic/models/embedders/<model>/<version>/ — optional; empty uses the dependency-free HashingEmbedder.",
+      "isOptional": true,
+      "regexes": ["^(gs://[^/]+/.+/|)$"]
     },
     {
       "name": "client_type",

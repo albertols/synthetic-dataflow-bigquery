@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import apache_beam as beam
+from sdfb_core.contracts import TableSchema
+from sdfb_core.engines import GenerationContext, ModelClient
 
 from sdfb_beam.dofns import (
     GenerateRecordsDoFn,
@@ -30,8 +32,6 @@ from sdfb_beam.dofns import (
     ValidateRecordDoFn,
 )
 from sdfb_beam.io.digest import compute_reference_digest
-from sdfb_core.contracts import TableSchema
-from sdfb_core.engines import GenerationContext, ModelClient
 
 
 @dataclass
@@ -51,6 +51,11 @@ class PipelineConfig:
     similarity: float = 0.5
     seed: int | None = None
     run_id: str = "local-run"
+    # Worker-local model paths surfaced to engines via GenerationContext.
+    # model_uri = the LLM (also given to the ModelClient); embedder_uri =
+    # B.1's embedder. Empty ⇒ the engine uses its dependency-free default.
+    model_uri: str = ""
+    embedder_uri: str = ""
 
 
 def build_pipeline(
@@ -73,6 +78,8 @@ def build_pipeline(
         reference_rows=reference_rows,
         reference_digest=digest,
         pipeline_run_id=config.run_id,
+        model_uri=config.model_uri,
+        embedder_uri=config.embedder_uri,
     )
 
     # Build batch request specs eagerly — driver-side, before the graph.

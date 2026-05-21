@@ -85,6 +85,13 @@ class GenerationContext(BaseModel):
     reference_rows: list[dict] = Field(default_factory=list)
     reference_digest: str = ""
     pipeline_run_id: str = ""
+    # Model locations for engines that build their own backends. `model_uri`
+    # is the LLM weights (the ModelClient also gets it); `embedder_uri` is
+    # B.1's embedder. On the worker these are local paths (warm-pulled from
+    # GCS by the DoFn); empty ⇒ the engine uses its dependency-free default
+    # (e.g. HashingEmbedder), which is what the contract tests exercise.
+    model_uri: str = ""
+    embedder_uri: str = ""
 
 
 class GenerationEngine(ABC):
