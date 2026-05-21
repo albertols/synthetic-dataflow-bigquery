@@ -28,3 +28,10 @@ sdfb-gpu/
 # 2026-05-21 — vllm_spike.py deleted (no local GPU; §11 Dataflow probe is the
 # vLLM validation path). Catch any re-introduced reference.
 vllm_spike
+
+# 2026-05-21 — GCS model-layout convention moved from `{project}-models` to
+# `{bucket}/synthetic/models/...` (matches the deploy workflows). The old
+# token survives only in docs/adr/ (excluded from this scan) as superseded
+# history; it must not reappear in live code/config/docs.
+project}-models
+project>-models

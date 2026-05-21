@@ -35,7 +35,15 @@
       "Bash(git ls-tree *)",
       "Bash(git add *)",
       "Bash(gh api *)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Skill(superpowers:brainstorming)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(gh search *)",
+      "Bash(command -v gh)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

@@ -9,7 +9,7 @@ Generate fictitious-but-realistic synthetic rows for a target BigQuery table, dr
 ## Hard constraints — do not violate without explicit user confirmation
 
 1. **No Vertex AI in the serving path.** Everything LLM happens inside Beam DoFns. If a design step is reaching for Vertex, stop and propose a self-hosted alternative on L4 workers.
-2. **No HuggingFace Hub at runtime.** Weights live in `gs://{project}-models/{family}/{model}/{version}/`, pulled once on the M4. The `transformers` / `safetensors` libraries are fine as file-format readers — never call `from_pretrained("org/repo")` against the Hub. `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set in the GPU container.
+2. **No HuggingFace Hub at runtime.** Weights live in `gs://{bucket}/synthetic/models/{family}/{model}/{version}/`, pulled once on the M4. The `transformers` / `safetensors` libraries are fine as file-format readers — never call `from_pretrained("org/repo")` against the Hub. `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set in the GPU container.
 3. **No Dataplex, no Looker.** Validation results land in BigQuery `synthetic_data_quality.*` tables and GCS HTML/JSON artifacts only. Do not propose dashboards or DQ scans.
 4. **No external LLM APIs.** GPT / Claude / Grok / Deepseek API calls violate the self-hosting contract. Off-pipeline benchmarking scripts are M2+ and out of M1 scope.
 5. **Single-table only for M1.** Primary-key awareness is in scope; FK / multi-table joins are M2+.

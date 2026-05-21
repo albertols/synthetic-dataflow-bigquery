@@ -41,7 +41,7 @@ See `scripts/run_dataflow.sh` (deferred to M1 §10–§11 — needs the GPU cont
 ## Hard constraints
 
 - LLM serving lives **inside Beam DoFns** via `apache_beam.ml.inference.RunInference` only — no Vertex AI in the serving path.
-- Model weights are pulled once into `gs://{project}-models/` on the M4 — no HuggingFace Hub at runtime (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`).
+- Model weights are pulled once into `gs://{bucket}/synthetic/models/` on the M4 — no HuggingFace Hub at runtime (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`).
 - Validation Mode A (Pydantic + Pandera + whylogs) is in-pipeline; Mode B (GX / Soda / SDMetrics / Evidently) is M2.
 - No Dataplex, no Looker Studio dashboards — validation outputs live in BigQuery `synthetic_data_quality.*` tables and GCS HTML/JSON only.
 

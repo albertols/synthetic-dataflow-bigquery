@@ -37,7 +37,7 @@ project_id = Variable.get("PROJECT_ID")
 region = Variable.get("REGION")
 subnetwork = Variable.get("DATAFLOW_SUBNET")
 service_account = Variable.get("SA_DATAFLOW")
-model_uri = Variable.get("SDFB_MODEL_URI")  # gs://<project>-models/gemma4/26b-a4b-awq/v1/
+model_uri = Variable.get("SDFB_MODEL_URI")  # e.g. gs://<bucket>/synthetic/models/gemma4/e4b-it/v1/ (set per-env)
 default_table_fqn = Variable.get("SDFB_DEFAULT_TABLE_FQN")
 
 # -----------------------------------------------------------------------------

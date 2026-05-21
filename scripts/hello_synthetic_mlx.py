@@ -53,8 +53,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--reference_limit", type=int, default=5)
     p.add_argument("--num_rows", type=int, default=5,
                    help="How many synthetic rows to attempt generating")
-    p.add_argument("--model_path", default="./models/gemma4/e4b/v1/",
-                   help="Local path to MLX-loadable HF-layout model directory")
+    p.add_argument("--model_path", default="./models/gemma4/e4b-it/v1/",
+                   help="Local path to MLX-loadable HF-layout model directory (use the -it variant)")
     p.add_argument("--output_dir", default="output",
                    help="Output JSONL goes to <output_dir>/<table>/hello_synthetic_mlx.jsonl")
     p.add_argument("--seed", type=int, default=42)

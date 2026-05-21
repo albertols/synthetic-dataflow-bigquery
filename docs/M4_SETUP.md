@@ -181,7 +181,7 @@ For real-LLM iteration on the M4 without burning Dataflow time, see **[`M4_LOCAL
 
 ### Step C — #9 (vLLM `ModelHandler`)
 
-Depends on having weights in GCS. Layout, download procedure, and runtime-load snippets: **[`MODEL_LAYOUT.md`](MODEL_LAYOUT.md)**. Pull Gemma 4 E4B → `gsutil cp -r` to `gs://<project>-models/gemma4/e4b/v1/` → then implement #9.
+Depends on having weights in GCS. Layout, download procedure, and runtime-load snippets: **[`MODEL_LAYOUT.md`](MODEL_LAYOUT.md)**. Stage Gemma 4 E4B-**it** weights to `gs://{bucket}/synthetic/models/gemma4/e4b-it/v1/` (use the `-it` variant — the base has no chat template) → then implement #9.
 
 ### Step D — #11 (end-to-end on Dataflow) + #12 (thresholds + `validation_runs` table)
 

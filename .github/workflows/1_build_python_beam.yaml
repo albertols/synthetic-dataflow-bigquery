@@ -1,186 +1,167 @@
-name: 1 - Build Python Beam image
+name: 1 - DB Python Beam Build
 
-# PRD-ready CICD for the Python Beam Flex Template image.
-# Mirrors the bank's Scala/PySpark patterns (WIF + GSM + sdlc-unlock-prod
-# + ARC self-hosted runners + JFrog as registry).
-#
-# Locked decisions: docs/CICD.md + docs/adr/0008-ci-driven-builds.md.
-#
-# Placeholders below MUST be filled in when this workflow is mirrored to the
-# bank-internal repository:
-#   <RUNNER_LABEL>            ARC runner pool label
-#   <SDLC_ORG>                Internal GitHub org hosting sdlc-workflows
-#   <ARTIFACTORY_HOSTNAME>    Corporate JFrog hostname
-#   <ARTIFACTORY_NAMESPACE>   Image namespace (e.g. com/<org>/<team>)
-#   <BUCKET_PREFIX>           Bucket name prefix (e.g. <orgcode>-<env>-<region>)
-#   <PROJECT_BUCKET_SUFFIX>   Bucket name suffix template
-#   <PROD_DEPLOY_SA>          Service account used for PRD deploy gate
+# Replaces the placeholder-laden 1_build_python_beam.yaml. The Dockerfile and
+# uv approach are kept; see docs/CICD.md + docker/Dockerfile.
+
+run-name: >-
+  ${{ github.workflow }} |
+  ${{ inputs.BUILD_TYPE }} |
+  push=${{ inputs.push_to_artifactory }}
+
 on:
   workflow_dispatch:
     inputs:
       BUILD_TYPE:
+        description: "Build Type"
         type: choice
         options: [Development, Release]
         default: Development
       push_to_artifactory:
+        description: "Also push the sdfb_beam wheel to JFrog pypi"
         type: boolean
         default: false
-        description: "Also push the sdfb_beam wheel to JFrog pypi"
-      servicenow-implementation-task:
-        type: string
-        required: false
-        description: "ITSK for the PRD SDLC unlock (ignored on DEV/UAT)"
 
 env:
-  ARTIFACTORY_HOSTNAME: "<ARTIFACTORY_HOSTNAME>"
-  ARTIFACTORY_NAMESPACE: "<ARTIFACTORY_NAMESPACE>"
+  ARTIFACTORY_NAMESPACE: "com/db/pwcclakees"
+  ARTIFACTORY_HOSTNAME: "the_artifactory"
+  ARTIFACTORY_BASE_URL: "https://the_artifactory"
   IMAGE_NAME: "sdfb-python"
-  PROJECT_BUCKET_SUFFIX: "<PROJECT_BUCKET_SUFFIX>"
-  REGION: "europe-west3"
+  PROJECT_BUCKET_SUFFIX: "the_project_bucket"
   PYTHON_VERSION: "3.11"
+  BUILD_TYPE: ${{ inputs.BUILD_TYPE || 'Development' }}
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # PRD gate via the bank's reusable SDLC workflow. Skipped on DEV/UAT.
-  # ---------------------------------------------------------------------------
-  sdlc-unlock-prod:
-    if: ${{ github.ref == 'refs/heads/RELEASE_dbc_prd' }}
-    uses: <SDLC_ORG>/sdlc-workflows/.github/workflows/sdlc_deployment_workflow.yml@main
-    with:
-      ITSK: ${{ inputs.servicenow-implementation-task }}
-      ENVIRONMENT: PRD
-      GOOGLE_DEPLOYMENT_SERVICE_ACCOUNT: "<PROD_DEPLOY_SA>"
-      DEPLOYMENT_TYPE: DATAFLOW
-    secrets:
-      GOOGLE_PIPELINE_SERVICE_ACCOUNT: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['prd/sdlc-ro-sa'] }}
 
   build:
-    needs: [sdlc-unlock-prod]
-    if: ${{ always() && (needs.sdlc-unlock-prod.result == 'skipped' || needs.sdlc-unlock-prod.result == 'success') }}
-    runs-on:
-      group: >-
-        ${{
-          github.ref_name == 'RELEASE_dbc_dev' && 'DEV' ||
-          github.ref_name == 'RELEASE_dbc_uat' && 'UAT' ||
-          github.ref_name == 'RELEASE_dbc_prd' && 'PRD' ||
-          'DEV'
-        }}
-      labels:
-        - <RUNNER_LABEL>
-    steps:
-      - uses: actions/checkout@v5
+    name: "Python Beam Build"
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_PRD }}"      >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=prd/sdlc-ro-sa"                         >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=prd/lz-deploy"                   >> $GITHUB_OUTPUT
+            elif [[ ${BRANCH_NAME} == RELEASE_dbc_uat ]]; then
+            echo "ENV_NAME=uat"                                                  >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_UAT }}"      >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=uat/lz-deploy"                          >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=uat/lz-deploy"                   >> $GITHUB_OUTPUT
+            else
+            echo "ENV_NAME=dev"                                                  >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_DEV }}"      >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=dev/lz-deploy"                          >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=dev/lz-deploy"                   >> $GITHUB_OUTPUT
+            fi
 
-      - name: Map branch → env
-        id: env
-        run: |
-          case "${GITHUB_REF##*/}" in
-            RELEASE_dbc_dev) ENV_NAME=dev; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
-            RELEASE_dbc_uat) ENV_NAME=uat; SERVICE_ACCOUNT_STRING=uat/lz-deploy ;;
-            RELEASE_dbc_prd) ENV_NAME=prd; SERVICE_ACCOUNT_STRING=prd/lz-deploy ;;
-            *)               ENV_NAME=dev; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
-          esac
-          echo "ENV_NAME=$ENV_NAME"                                 >> $GITHUB_OUTPUT
-          echo "SERVICE_ACCOUNT_STRING=$SERVICE_ACCOUNT_STRING"     >> $GITHUB_OUTPUT
-          GOOGLE_PROJECT_DBC="${{ secrets[format('GOOGLE_PROJECT_DBC_{0}', '$ENV_NAME')] }}"
-          echo "GOOGLE_PROJECT_DBC=$GOOGLE_PROJECT_DBC"             >> $GITHUB_OUTPUT
-          echo "ENV_NAME=$ENV_NAME"                                 >> $GITHUB_ENV
+            - name: "Authenticate to Google Cloud for secrets - ${{ env.ENV_NAME }}"
+              uses: google-github-actions/auth@v3
+              with:
+                workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+                service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.environment.outputs.SERVICE_ACCOUNT_STRING] }}
 
-      - uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
-          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.env.outputs.SERVICE_ACCOUNT_STRING] }}
+            - id: get-secrets
+              name: "Get secret"
+              uses: google-github-actions/get-secretmanager-secrets@v3
+              with:
+                secrets: |-
+                  artifactory_developer_username:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_USERNAME
+                  artifactory_developer_password:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_PASSWORD
+                  artifactory_release_username:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_USERNAME
+                  artifactory_release_password:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_PASSWORD
 
-      - uses: google-github-actions/setup-gcloud@v3
+      # PRD only: switch from read-only secrets SA to the deploy SA before
+      # docker push (mirrors pe-btr-producer-scala-beam build.yaml lines 149-154).
+            - name: "Authenticate to Google Cloud for build - ${{ env.ENV_NAME }}"
+              if: env.ENV_NAME == 'prd'
+              uses: google-github-actions/auth@v3
+              with:
+                workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+                service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.environment.outputs.DEPLOY_SERVICE_ACCOUNT_STRING] }}
 
-      - id: get-secrets
-        uses: google-github-actions/get-secretmanager-secrets@v3
-        with:
-          secrets: |-
-            artifactory_developer_username:${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_USERNAME
-            artifactory_developer_password:${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_PASSWORD
-            artifactory_releaser_username:${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_USERNAME
-            artifactory_releaser_password:${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_PASSWORD
+            - name: "Set up Cloud SDK"
+              uses: google-github-actions/setup-gcloud@v3
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: latest
-          enable-cache: true
-          cache-dependency-glob: |
-            **/uv.lock
-            **/pyproject.toml
-          python-version: ${{ env.PYTHON_VERSION }}
+            - name: "Install uv"
+              uses: astral-sh/setup-uv@v3
+              with:
+                enable-cache: true
+                cache-dependency-glob: |
+                  **/uv.lock
+                  **/pyproject.toml
+                python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Sync workspace for the sanity gate (dev tools, no heavy extras)
-        # pytest -m "not gpu and not gcp" imports none of vllm/torch/faiss/sdgx,
-        # so we skip those extras here — they're installed inside the docker
-        # build, where they're actually used. Keeps the gate fast.
-        run: uv sync --frozen --all-packages
+            - name: "Sync workspace (no dev tools, no GPU — GPU deps live only in the Docker image)"
+              run: uv sync --frozen --no-dev --all-packages
 
-      - name: Sanity gate — laptop-side tests
-        # Rejects broken code before the slow docker build runs.
-        run: uv run pytest -m "not gpu and not gcp" -q
+            - name: "Sanity gate — laptop-side tests"
+              # Rejects broken code before the slow docker build runs.
+              run: uv run pytest -m "not gpu and not gcp" -q
 
-      - name: Derive PROJECT_VERSION + RELEASE_VERSION
-        run: |
-          VER=$(uv run python -c "import importlib.metadata as m; print(m.version('sdfb-beam'))")
-          echo "PROJECT_VERSION=$VER" >> $GITHUB_ENV
-          if [[ "${{ inputs.BUILD_TYPE }}" == "Release" ]]; then
-            echo "RELEASE_VERSION=$VER" >> $GITHUB_ENV
-          else
-            BR="${GITHUB_REF#refs/*/}"
-            BR="${BR//\//-}"
-            SHA=$(git rev-parse --short HEAD)
-            echo "RELEASE_VERSION=${BR}-${SHA}" >> $GITHUB_ENV
-          fi
+            - name: "Set PROJECT_VERSION"
+              run: |
+                VER=$(uv run python -c "import importlib.metadata as m; print(m.version('sdfb-beam'))")
+                echo "PROJECT_VERSION=$VER" >> $GITHUB_ENV
 
-      - name: Build sdfb-beam wheel
-        run: uv build --package sdfb-beam --wheel --out-dir dist
+            - name: "Set RELEASE_VERSION"
+              run: |
+                replaceSlashWithDash(){ echo "$1" | sed -r 's/\//-/g'; }
+                if [[ "${{ env.BUILD_TYPE }}" == "Release" ]]; then
+                  echo "RELEASE_VERSION=${{ env.PROJECT_VERSION }}" >> $GITHUB_ENV
+                else
+                  echo "RELEASE_VERSION=$(replaceSlashWithDash "${GITHUB_REF#refs/*/}")-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+                fi
 
-      - name: Docker build & push
-        env:
-          ARTIFACTORY_RELEASER_USERNAME: ${{ steps.get-secrets.outputs.artifactory_releaser_username }}
-          ARTIFACTORY_RELEASER_PASSWORD: ${{ steps.get-secrets.outputs.artifactory_releaser_password }}
-        run: |
-          IMG="$ARTIFACTORY_HOSTNAME/dkr-public-local/$ARTIFACTORY_NAMESPACE/$IMAGE_NAME"
-          echo "$ARTIFACTORY_RELEASER_PASSWORD" | docker login --password-stdin \
-              --username "$ARTIFACTORY_RELEASER_USERNAME" "$ARTIFACTORY_HOSTNAME/"
-          # Base images resolve from JFrog via ARTIFACTORY_HOSTNAME_ARG (the
-          # Dockerfile interpolates CUDA_IMAGE/BEAM_SDK_IMAGE off it). The
-          # Flex launcher defaults to gcr.io — if ARC runners cannot reach
-          # gcr.io, uncomment the --build-arg LAUNCHER_IMAGE override below
-          # with the JFrog-mirrored path (see ADR 0012).
-          DOCKER_BUILDKIT=1 docker build \
-            --platform=linux/amd64 \
-            -f docker/Dockerfile \
-            -t "$IMG:$RELEASE_VERSION" \
-            -t "$IMG:latest" \
-            --cache-from "$IMG:latest" \
-            --build-arg ENV_NAME_ARG=$ENV_NAME \
-            --build-arg ARTIFACTORY_HOSTNAME_ARG=$ARTIFACTORY_HOSTNAME \
-            --build-arg ARTIFACTORY_RELEASER_USERNAME_ARG=$ARTIFACTORY_RELEASER_USERNAME \
-            --build-arg ARTIFACTORY_RELEASER_PWD_ARG=$ARTIFACTORY_RELEASER_PASSWORD \
-            .
-            # --build-arg LAUNCHER_IMAGE=$ARTIFACTORY_HOSTNAME/<mirror>/dataflow-templates-base/python311-template-launcher-base \
-          docker push "$IMG:$RELEASE_VERSION"
-          docker push "$IMG:latest"
+            - name: "Build sdfb-beam wheel"
+              run: uv build --package sdfb-beam --wheel --out-dir dist
 
-      - name: Upload wheel + config to GCS
-        run: |
-          BKT="<BUCKET_PREFIX>-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-synthetic"
-          gsutil cp "dist/sdfb_beam-${PROJECT_VERSION}-py3-none-any.whl" "gs://$BKT/sdfb/${PROJECT_VERSION}/"
-          gsutil -m rsync -r -d config/ "gs://$BKT/sdfb/${PROJECT_VERSION}/config/"
+            - name: "Build ${{ env.BUILD_TYPE }} image for env: ${{ env.ENV_NAME }}"
+              env:
+                ARTIFACTORY_RELEASER_USERNAME: ${{ steps.get-secrets.outputs.artifactory_release_username }}
+                ARTIFACTORY_RELEASER_PASSWORD: ${{ steps.get-secrets.outputs.artifactory_release_password }}
+                ARTIFACTORY_DEVELOPER_USERNAME: ${{ steps.get-secrets.outputs.artifactory_developer_username }}
+                ARTIFACTORY_DEVELOPER_PASSWORD: ${{ steps.get-secrets.outputs.artifactory_developer_password }}
+              run: |-
+                # Proxy bypass for the internal JFrog (mirrors scala build.yaml lines 191-196).
+                export no_proxy="${no_proxy},${ARTIFACTORY_HOSTNAME}"
+                export NO_PROXY="${NO_PROXY},${ARTIFACTORY_HOSTNAME}"
+                export HTTPS_PROXY="" https_proxy="" HTTP_PROXY="" http_proxy=""
+                
+                IMG="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${IMAGE_NAME}"
+                
+                echo "Logging into docker"
+                echo "${ARTIFACTORY_RELEASER_PASSWORD}" | docker login --password-stdin \
+                    --username "${ARTIFACTORY_RELEASER_USERNAME}" "${ARTIFACTORY_BASE_URL}/"
+                
+                # Base images resolve from JFrog via ARTIFACTORY_HOSTNAME_ARG (the
+                # Dockerfile interpolates CUDA_IMAGE/BEAM_SDK_IMAGE off it). The
+                # Flex launcher defaults to gcr.io — if ARC runners cannot reach
+                # gcr.io, uncomment the --build-arg LAUNCHER_IMAGE override below
+                # with the JFrog-mirrored path (see ADR 0012).
+                DOCKER_BUILDKIT=1 docker build \
+                  --platform=linux/amd64 \
+                  -f docker/Dockerfile \
+                  -t "$IMG:$RELEASE_VERSION" \
+                  -t "$IMG:latest" \
+                  --cache-from "$IMG:latest" \
+                  --build-arg ENV_NAME_ARG=$ENV_NAME \
+                  --build-arg ARTIFACTORY_HOSTNAME_ARG=$ARTIFACTORY_HOSTNAME \
+                  --build-arg ARTIFACTORY_RELEASER_USERNAME_ARG=$ARTIFACTORY_RELEASER_USERNAME \
+                  --build-arg ARTIFACTORY_RELEASER_PWD_ARG=$ARTIFACTORY_RELEASER_PASSWORD \
+                  .
+                  # --build-arg LAUNCHER_IMAGE=$ARTIFACTORY_HOSTNAME/<mirror>/dataflow-templates-base/python311-template-launcher-base \
+                
+                docker images | head -20
+                
+                echo "Pushing → ${IMG}:${RELEASE_VERSION}"
+                docker push "${IMG}:${RELEASE_VERSION}"
+                docker push "${IMG}:latest"
 
-      - name: Push wheel to JFrog pypi (optional)
-        if: ${{ inputs.push_to_artifactory }}
-        uses: <SDLC_ORG>/sdlc-workflows/.github/actions/push-to-artifactory@main
-        with:
-          artifact_path: dist/sdfb_beam-${{ env.PROJECT_VERSION }}-py3-none-any.whl
-          artifactory_repository: "pypi-all/${{ env.ARTIFACTORY_NAMESPACE }}/sdfb-beam/${{ env.PROJECT_VERSION }}"
-          default_wif_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
-          wif_service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.env.outputs.SERVICE_ACCOUNT_STRING] }}
-          secrets_project: ${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}
+            - name: "Push wheel to JFrog pypi (optional)"
+              if: ${{ inputs.push_to_artifactory }}
+              uses: the-gh-scace/sdlc-workflows/.github/actions/push-to-artifactory@main
+              with:
+                artifact_path: dist/sdfb_beam-${{ env.PROJECT_VERSION }}-py3-none-any.whl
+                artifactory_repository: "pypi-all/${{ env.ARTIFACTORY_NAMESPACE }}/sdfb-beam/${{ env.PROJECT_VERSION }}"
+                default_wif_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+                wif_service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.environment.outputs.SERVICE_ACCOUNT_STRING] }}
+                secrets_project: ${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}

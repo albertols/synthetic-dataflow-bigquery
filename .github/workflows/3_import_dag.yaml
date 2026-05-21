@@ -1,40 +1,67 @@
-name: 3 - Import synthetic DAG into Composer
+name: 3 - DB Import synthetic DAG into Composer
 
 # Substitutes build-time values into composer/synthetic_beam_bigquery.py and
-# imports it into the env-specific Composer environment. See docs/CICD.md §5.
+# imports it into the per-env Composer environment.
+
+
+run-name: >-
+  ${{ github.workflow }} |
+  ${{ inputs.BUILD_TYPE }} |
+  ${{ inputs.project_version || 'auto' }}
+
 on:
   workflow_dispatch:
     inputs:
+      BUILD_TYPE:
+        description: "Build Type (must match workflow 2)"
+        type: choice
+        options: [Development, Release]
+        default: Development
       project_version:
         type: string
+        description: "Override version/tag (default: auto-derived same as workflow 2)"
         required: false
-        description: "Project version to bind into the DAG (default: derive from packages/sdfb-beam/pyproject.toml)"
+      model_uri:
+        type: string
+        description: "GCS URI to the model weights (e.g. gs://the-gcs-bucket/synthetic/models/gemma4/e4b-it/v1)"
+        required: true
+        default: "gs://the-gcs-bucket/synthetic/models/gemma4/e4b-it/v1"
+      default_table_fqn:
+        type: string
+        description: "Default BigQuery table FQN (the-dev-project.synthetic_data.default_table)"
+        required: true
+        default: "the-dev-project.synthetic_data.default_table"
+      ddl_uri:
+        type: string
+        description: "GCS URI to the DDL JSON (e.g. gs://…/ddl.json)"
+        required: true
+        default: "gs://the-gcs-bucket/synthetic/ddls/ddl_metadata_CDH_dataset_KW860T_RR.json"
+      landing_table:
+        type: string
+        description: "Landing BigQuery table (the-dev-project.synthetic_data.sdfb_landing)"
+        required: true
+        default: "the-dev-project.synthetic_data.sdfb_landing"
+      dlq_table:
+        type: string
+        description: "DLQ BigQuery table (the-dev-project.synthetic_data.sdfb_dlq)"
+        required: true
+        default: "the-dev-project.synthetic_data.sdfb_dlq"
       servicenow-implementation-task:
         type: string
+        description: "ITSK/CHG Number (required only for production)"
         required: false
 
 env:
   REGION: "europe-west3"
+  PROJECT_BUCKET_SUFFIX: "the-project-bucket"
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  sdlc-unlock-prod:
-    if: ${{ github.ref == 'refs/heads/RELEASE_dbc_prd' }}
-    uses: <SDLC_ORG>/sdlc-workflows/.github/workflows/sdlc_deployment_workflow.yml@main
-    with:
-      ITSK: ${{ inputs.servicenow-implementation-task }}
-      ENVIRONMENT: PRD
-      GOOGLE_DEPLOYMENT_SERVICE_ACCOUNT: "<PROD_DEPLOY_SA>"
-      DEPLOYMENT_TYPE: COMPOSER
-    secrets:
-      GOOGLE_PIPELINE_SERVICE_ACCOUNT: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['prd/sdlc-ro-sa'] }}
-
   import:
-    needs: [sdlc-unlock-prod]
-    if: ${{ always() && (needs.sdlc-unlock-prod.result == 'skipped' || needs.sdlc-unlock-prod.result == 'success') }}
+    name: "Import DAG"
     runs-on:
       group: >-
         ${{
@@ -43,64 +70,120 @@ jobs:
           github.ref_name == 'RELEASE_dbc_prd' && 'PRD' ||
           'DEV'
         }}
-      labels:
-        - <RUNNER_LABEL>
+
+    environment: >-
+      ${{
+        github.ref_name == 'RELEASE_dbc_dev' && 'dev' ||
+        github.ref_name == 'RELEASE_dbc_uat' && 'uat' ||
+        github.ref_name == 'RELEASE_dbc_prd' && 'prd' ||
+        'dev'
+      }}
+
     steps:
-      - uses: actions/checkout@v5
+      - name: "Checkout code"
+        uses: actions/checkout@v6.0.2
 
-      - name: Map branch → env
-        id: env
+      - id: environment
+        name: "Set project and credentials"
+        shell: bash
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
         run: |
-          case "${GITHUB_REF##*/}" in
-            RELEASE_dbc_dev) ENV_NAME=dev; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
-            RELEASE_dbc_uat) ENV_NAME=uat; SERVICE_ACCOUNT_STRING=uat/lz-deploy ;;
-            RELEASE_dbc_prd) ENV_NAME=prd; SERVICE_ACCOUNT_STRING=prd/lz-deploy ;;
-            *)               ENV_NAME=dev; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
-          esac
-          GOOGLE_PROJECT_DBC="${{ secrets[format('GOOGLE_PROJECT_DBC_{0}', '$ENV_NAME')] }}"
-          {
-            echo "ENV_NAME=$ENV_NAME"
-            echo "GOOGLE_PROJECT_DBC=$GOOGLE_PROJECT_DBC"
-            echo "SERVICE_ACCOUNT_STRING=$SERVICE_ACCOUNT_STRING"
-          } >> $GITHUB_OUTPUT
+          set -e
+          if [[ ${BRANCH_NAME} == RELEASE_dbc_prd ]]; then
+            echo "ENV_NAME=prd"                                              >> $GITHUB_ENV
+            echo "PROJECT_ID=the-prd-project"                        >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_PRD }}"  >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=prd/sdlc-ro-sa"                     >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=prd/lz-deploy"               >> $GITHUB_OUTPUT
+          elif [[ ${BRANCH_NAME} == RELEASE_dbc_uat ]]; then
+            echo "ENV_NAME=uat"                                              >> $GITHUB_ENV
+            echo "PROJECT_ID=the-uat-project"                        >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_UAT }}"  >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=uat/lz-deploy"                      >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=uat/lz-deploy"               >> $GITHUB_OUTPUT
+          else
+            echo "ENV_NAME=dev"                                              >> $GITHUB_ENV
+            echo "PROJECT_ID=the-dev-project"                        >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_DEV }}"  >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=dev/lz-deploy"                      >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=dev/lz-deploy"               >> $GITHUB_OUTPUT
+          fi
 
-      - uses: google-github-actions/auth@v3
+      - name: "Authenticate to Google Cloud for secrets - ${{ env.ENV_NAME }}"
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
-          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.env.outputs.SERVICE_ACCOUNT_STRING] }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.environment.outputs.SERVICE_ACCOUNT_STRING] }}
 
-      - uses: google-github-actions/setup-gcloud@v3
+      - id: get-secrets
+        name: "Get secret"
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            artifactory_developer_username:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_USERNAME
+            artifactory_developer_password:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_PASSWORD
+            artifactory_release_username:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_USERNAME
+            artifactory_release_password:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_PASSWORD
 
-      - name: Resolve PROJECT_VERSION + DAG_VERSION
+      # PRD only: switch from read-only secrets SA to the deploy SA before
+      # the import call (mirrors pe-btr-producer-scala-beam import_DAG.yml).
+      - name: "Authenticate to Google Cloud for import - ${{ env.ENV_NAME }}"
+        if: env.ENV_NAME == 'prd'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.environment.outputs.DEPLOY_SERVICE_ACCOUNT_STRING] }}
+
+      - name: "Set up Cloud SDK"
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: "Resolve PROJECT_VERSION + DAG_VERSION"
         run: |
           if [[ -n "${{ inputs.project_version }}" ]]; then
             VER="${{ inputs.project_version }}"
-          else
+          elif [[ "${{ inputs.BUILD_TYPE }}" == "Release" ]]; then
+            # Release: use pyproject.toml version (same as workflows 1 & 2).
             VER=$(grep -m1 '^version' packages/sdfb-beam/pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          else
+            # Development: derive branch-sha tag (same as workflows 1 & 2).
+            replaceSlashWithDash(){ echo "$1" | sed -r 's/\//-/g'; }
+            VER="$(replaceSlashWithDash "${GITHUB_REF#refs/*/}")-$(git rev-parse --short HEAD)"
           fi
+
+          if [[ -z "$VER" ]]; then
+            echo "ERROR: PROJECT_VERSION is empty."
+            exit 1
+          fi
+
           DAG_VERSION="${VER}_$(date +'%Y_%m_%d_%H_%M')"
-          echo "PROJECT_VERSION=$VER"          >> $GITHUB_ENV
-          echo "DAG_VERSION=$DAG_VERSION"      >> $GITHUB_ENV
+          echo "PROJECT_VERSION=$VER"     >> $GITHUB_ENV
+          echo "DAG_VERSION=$DAG_VERSION" >> $GITHUB_ENV
+          echo "Resolved: PROJECT_VERSION=$VER, DAG_VERSION=$DAG_VERSION"
 
-      - name: Substitute build-time placeholders
-        env:
-          ENV_NAME: ${{ steps.env.outputs.ENV_NAME }}
+      - name: "Substitute build-time placeholders"
         run: |
+          # Only PROJECT_VERSION / DAG_VERSION / ENV are baked in at import time
+          # — those are the only {{...}} markers the DAG actually contains.
+          # Model URI, DDL URI, table FQNs and bucket paths are read at RUNTIME
+          # from Composer Variables (Variable.get / {{ var.value.* }} in the DAG)
+          # and must be set out-of-band per env — this workflow has no
+          # gcloud-composer perms to set them. The workflow_dispatch inputs above
+          # document the expected Variable values (SDFB_MODEL_URI, SDFB_DDL_URI,
+          # SDFB_LANDING_TABLE, SDFB_DLQ_TABLE, SDFB_DEFAULT_TABLE_FQN,
+          # GCS_SYNTHETIC_DATAFLOW_STAGING, GCS_SYNTHETIC_DATAFLOW_TEMPLATES, …).
           sed -i \
-            -e "s/{{PROJECT_VERSION}}/${PROJECT_VERSION}/g" \
-            -e "s/{{DAG_VERSION}}/${DAG_VERSION}/g" \
-            -e "s/{{ENV}}/${ENV_NAME}/g" \
+            -e "s|{{PROJECT_VERSION}}|${PROJECT_VERSION}|g" \
+            -e "s|{{DAG_VERSION}}|${DAG_VERSION}|g" \
+            -e "s|{{ENV}}|${ENV_NAME}|g" \
             composer/synthetic_beam_bigquery.py
-          echo "--- substituted DAG (first 30 lines) ---"
-          head -30 composer/synthetic_beam_bigquery.py
+          echo "--- substituted DAG (first 60 lines) ---"
+          head -60 composer/synthetic_beam_bigquery.py
 
-      - name: Import into Composer
-        env:
-          PROJECT_ID: ${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}
-          ENV_NAME: ${{ steps.env.outputs.ENV_NAME }}
+      - name: "Import DAG into Composer"
         run: |
           gcloud composer environments storage dags import \
             --project="${PROJECT_ID}" \
-            --environment="<COMPOSER_NAME_PREFIX>-${ENV_NAME}-<TEAM>-composerv2-${REGION}" \
+            --environment="db-${ENV_NAME}-pwcclake-es-composerv2-${REGION}" \
             --location="${REGION}" \
             --source=composer/synthetic_beam_bigquery.py

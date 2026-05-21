@@ -8,7 +8,7 @@ Where model weights live, in what format, for which runner.
 |---|---|---|---|
 | **DirectRunner (this laptop)** | `FakeModelClient` (no real model) | n/a — test fake | n/a |
 | **DirectRunner (M4 — stretch / optional)** | `./models/{family}/{model}/{version}/` | MLX, llama.cpp, or vLLM-CPU | safetensors (or GGUF) |
-| **Dataflow (L4 GPU workers)** | `gs://{project}-models/{family}/{model}/{version}/` | vLLM with CUDA | safetensors + AWQ Q4 |
+| **Dataflow (L4 GPU workers)** | `gs://{bucket}/synthetic/models/{family}/{model}/{version}/` | vLLM with CUDA | safetensors + AWQ Q4 |
 
 **For M1 §8 specifically** (the DAG end-to-end on DirectRunner), no real model is needed — `FakeModelClient` substitutes. Everything below is for §9–§11 when real LLMs come online.
 
@@ -17,9 +17,9 @@ Where model weights live, in what format, for which runner.
 ## Canonical GCS layout (Dataflow workers)
 
 ```
-gs://{project}-models/
+gs://{bucket}/synthetic/models/
 ├── gemma4/
-│   ├── e4b/v1/                  # Gemma 4 E4B (4.5B effective) — dev / cost-floor
+│   ├── e4b-it/v1/                  # Gemma 4 E4B (4.5B effective) — dev / cost-floor
 │   │   ├── config.json
 │   │   ├── tokenizer.json
 │   │   ├── tokenizer_config.json
@@ -46,7 +46,7 @@ gs://{project}-models/
 ```
 
 Rules:
-- The addressable unit is the **`{family}/{model}/{version}/` triple**. The pipeline flag is `--model_uri=gs://{project}-models/gemma4/e4b/v1/`.
+- The addressable unit is the **`{family}/{model}/{version}/` triple**. The pipeline flag is `--model_uri=gs://{bucket}/synthetic/models/gemma4/e4b-it/v1/`.
 - Version directories are **immutable**. New version = new directory. Never overwrite `v1/` — bump to `v2/`.
 - Worker `setup()` runs **one** `gsutil -m cp -r {model_uri}/ /local-ssd/model/` per worker lifetime; vLLM loads from the local-SSD path.
 
@@ -58,7 +58,7 @@ Mirror the GCS structure under the repo's `./models/` (gitignored — see `.giti
 ~/IdeaProjects/synthetic-dataflow-bigquery/
 └── models/                       # gitignored
     └── gemma4/
-        ├── e4b/v1/               # ~9 GB at FP16 — fits comfortably on M4 24 GB
+        ├── e4b-it/v1/               # ~9 GB at FP16 — fits comfortably on M4 24 GB
         └── 26b-a4b-awq/v1/       # ~13 GB at Q4-AWQ — tight but fits
 ```
 
@@ -93,17 +93,17 @@ The non-HuggingFace source for Gemma is **Kaggle** (Google-hosted, license-clean
 2. Accept the Gemma model license once on the Kaggle model page (https://kaggle.com/models/google/gemma-4).
 3. Download:
    ```bash
-   mkdir -p models/gemma4/e4b/v1
+   mkdir -p models/gemma4/e4b-it/v1
    kaggle models instances versions download google/gemma-4/transformers/e4b/1 \
-     -p models/gemma4/e4b/v1
+     -p models/gemma4/e4b-it/v1
    # Kaggle delivers as a zip — extract in place
-   unzip models/gemma4/e4b/v1/*.zip -d models/gemma4/e4b/v1/
-   rm models/gemma4/e4b/v1/*.zip
+   unzip models/gemma4/e4b-it/v1/*.zip -d models/gemma4/e4b-it/v1/
+   rm models/gemma4/e4b-it/v1/*.zip
    ```
 4. Verify the file-level checklist below.
 5. Upload to GCS for Dataflow workers:
    ```bash
-   gsutil -m cp -r models/gemma4/e4b/v1/ gs://{project}-models/gemma4/e4b/v1/
+   gsutil -m cp -r models/gemma4/e4b-it/v1/ gs://{bucket}/synthetic/models/gemma4/e4b-it/v1/
    ```
 
 For Qwen 2.5 (not on Kaggle), use the official Qwen GitHub release tarball: https://github.com/QwenLM/Qwen2.5/releases (download → extract → same layout).

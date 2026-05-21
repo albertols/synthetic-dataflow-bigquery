@@ -39,7 +39,7 @@ Both binaries are copied into the final image via multi-stage `COPY --from`. See
 
 ## Model warm-pull
 
-The image is intentionally weights-free. Model weights live in `gs://{project}-models/{family}/{model}/{version}/` and are pulled once per worker lifetime inside the `ModelClient.setup()` method. We use the **`google-cloud-storage` Python client**, not `gsutil` — the CLI would force a `google-cloud-cli` apt install from `packages.cloud.google.com`, which ARC runners and private-IP workers can't reach. The client is already a transitive dep of `apache-beam[gcp]` and authenticates via ADC.
+The image is intentionally weights-free. Model weights live in `gs://{bucket}/synthetic/models/{family}/{model}/{version}/` and are pulled once per worker lifetime inside the `ModelClient.setup()` method. We use the **`google-cloud-storage` Python client**, not `gsutil` — the CLI would force a `google-cloud-cli` apt install from `packages.cloud.google.com`, which ARC runners and private-IP workers can't reach. The client is already a transitive dep of `apache-beam[gcp]` and authenticates via ADC.
 
 ```python
 # packages/sdfb-beam/src/sdfb_beam/handlers/vllm_client.py (real impl in M1 §9)

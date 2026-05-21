@@ -1,7 +1,14 @@
-name: 2 - Deploy Python Beam Flex Template
+name: 2 - DB Deploy Python Beam Flex Template
 
 # Publishes the Flex Template JSON pointing at an existing sdfb-python image
-# (built by workflow 1). See docs/CICD.md §4.
+# (built by workflow 1_db_build_python_beam.yaml) and rsyncs the runtime
+# config/ directory to the per-version GCS location the DAG reads from.
+#
+
+run-name: >-
+  ${{ github.workflow }} |
+  ${{ inputs.BUILD_TYPE }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +19,7 @@ on:
       override_image_tag:
         type: string
         required: false
-        description: "Pin a specific image tag (default: latest Development tag from current branch)"
+        description: "Pin a specific image tag (default: derived from BUILD_TYPE + branch)"
       servicenow-implementation-task:
         type: string
         required: false
@@ -23,26 +30,15 @@ env:
   IMAGE_NAME: "sdfb-python"
   PROJECT_BUCKET_SUFFIX: "<PROJECT_BUCKET_SUFFIX>"
   REGION: "europe-west3"
+  BUILD_TYPE: ${{ inputs.BUILD_TYPE || 'Development' }}
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  sdlc-unlock-prod:
-    if: ${{ github.ref == 'refs/heads/RELEASE_dbc_prd' }}
-    uses: <SDLC_ORG>/sdlc-workflows/.github/workflows/sdlc_deployment_workflow.yml@main
-    with:
-      ITSK: ${{ inputs.servicenow-implementation-task }}
-      ENVIRONMENT: PRD
-      GOOGLE_DEPLOYMENT_SERVICE_ACCOUNT: "<PROD_DEPLOY_SA>"
-      DEPLOYMENT_TYPE: DATAFLOW
-    secrets:
-      GOOGLE_PIPELINE_SERVICE_ACCOUNT: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['prd/sdlc-ro-sa'] }}
 
   deploy:
-    needs: [sdlc-unlock-prod]
-    if: ${{ always() && (needs.sdlc-unlock-prod.result == 'skipped' || needs.sdlc-unlock-prod.result == 'success') }}
     runs-on:
       group: >-
         ${{
@@ -51,63 +47,96 @@ jobs:
           github.ref_name == 'RELEASE_dbc_prd' && 'PRD' ||
           'DEV'
         }}
-      labels:
-        - <RUNNER_LABEL>
+
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6.0.2
 
-      - name: Map branch → env
-        id: env
+      - id: environment
+        name: "Set project and credentials"
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
         run: |
-          case "${GITHUB_REF##*/}" in
-            RELEASE_dbc_dev) ENV_NAME=dev; KEYS_PROJECT=<KEYS_PROJECT_ID_DEV>; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
-            RELEASE_dbc_uat) ENV_NAME=uat; KEYS_PROJECT=<KEYS_PROJECT_ID_UAT>; SERVICE_ACCOUNT_STRING=uat/lz-deploy ;;
-            RELEASE_dbc_prd) ENV_NAME=prd; KEYS_PROJECT=<KEYS_PROJECT_ID_PRD>; SERVICE_ACCOUNT_STRING=prd/lz-deploy ;;
-            *)               ENV_NAME=dev; KEYS_PROJECT=<KEYS_PROJECT_ID_DEV>; SERVICE_ACCOUNT_STRING=dev/lz-deploy ;;
-          esac
-          GOOGLE_PROJECT_DBC="${{ secrets[format('GOOGLE_PROJECT_DBC_{0}', '$ENV_NAME')] }}"
-          {
-            echo "ENV_NAME=$ENV_NAME"
-            echo "KEYS_PROJECT=$KEYS_PROJECT"
-            echo "GOOGLE_PROJECT_DBC=$GOOGLE_PROJECT_DBC"
-            echo "SERVICE_ACCOUNT_STRING=$SERVICE_ACCOUNT_STRING"
-          } >> $GITHUB_OUTPUT
-          echo "ENV_NAME=$ENV_NAME" >> $GITHUB_ENV
+          set -e
+          if [[ ${BRANCH_NAME} == RELEASE_dbc_prd ]]; then
+            echo "ENV_NAME=prd"                                              >> $GITHUB_ENV
+            echo "KEYS_PROJECT_ID=the_keys"                >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_PRD }}"  >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=prd/sdlc-ro-sa"                     >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=prd/lz-deploy"               >> $GITHUB_OUTPUT
+          elif [[ ${BRANCH_NAME} == RELEASE_dbc_uat ]]; then
+            echo "ENV_NAME=uat"                                              >> $GITHUB_ENV
+            echo "KEYS_PROJECT_ID=the_keys"                >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_UAT }}"  >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=uat/lz-deploy"                      >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=uat/lz-deploy"               >> $GITHUB_OUTPUT
+          else
+            echo "ENV_NAME=dev"                                              >> $GITHUB_ENV
+            echo "KEYS_PROJECT_ID=the_keys"                >> $GITHUB_ENV
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_DEV }}"  >> $GITHUB_OUTPUT
+            echo "SERVICE_ACCOUNT_STRING=dev/lz-deploy"                      >> $GITHUB_OUTPUT
+            echo "DEPLOY_SERVICE_ACCOUNT_STRING=dev/lz-deploy"               >> $GITHUB_OUTPUT
+          fi
 
-      - uses: google-github-actions/auth@v3
+      - name: "Authenticate to Google Cloud for secrets - ${{ env.ENV_NAME }}"
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
-          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.env.outputs.SERVICE_ACCOUNT_STRING] }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.environment.outputs.SERVICE_ACCOUNT_STRING] }}
 
-      - uses: google-github-actions/setup-gcloud@v3
+      - id: get-secrets
+        name: "Get secret"
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            artifactory_developer_username:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_USERNAME
+            artifactory_developer_password:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_PASSWORD
+            artifactory_releaser_username:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_USERNAME
+            artifactory_releaser_password:${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_PASSWORD
 
-      - name: Resolve RELEASE_VERSION
+      - name: "Authenticate to Google Cloud for deploy - ${{ env.ENV_NAME }}"
+        if: env.ENV_NAME == 'prd'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)[steps.environment.outputs.DEPLOY_SERVICE_ACCOUNT_STRING] }}
+
+      - name: "Set up Cloud SDK"
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: "Resolve RELEASE_VERSION"
         run: |
+          replaceSlashWithDash(){ echo "$1" | sed -r 's/\//-/g'; }
           if [[ -n "${{ inputs.override_image_tag }}" ]]; then
             echo "RELEASE_VERSION=${{ inputs.override_image_tag }}" >> $GITHUB_ENV
-          elif [[ "${{ inputs.BUILD_TYPE }}" == "Release" ]]; then
+          elif [[ "${{ env.BUILD_TYPE }}" == "Release" ]]; then
             VER=$(grep -m1 '^version' packages/sdfb-beam/pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
             echo "RELEASE_VERSION=$VER" >> $GITHUB_ENV
           else
-            BR="${GITHUB_REF#refs/*/}"
-            BR="${BR//\//-}"
-            SHA=$(git rev-parse --short HEAD)
-            echo "RELEASE_VERSION=${BR}-${SHA}" >> $GITHUB_ENV
+            echo "RELEASE_VERSION=$(replaceSlashWithDash "${GITHUB_REF#refs/*/}")-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           fi
 
-      - name: gcloud dataflow flex-template build
-        env:
-          PROJECT_ID: ${{ steps.env.outputs.GOOGLE_PROJECT_DBC }}
+      - name: "Set DF_TEMPLATE_PATH"
         run: |
-          DF_TEMPLATE_PATH="gs://<BUCKET_PREFIX>-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-templates/synthetic/sdfb-${RELEASE_VERSION}-template.json"
-          IMG="$ARTIFACTORY_HOSTNAME/dkr-public-local/$ARTIFACTORY_NAMESPACE/$IMAGE_NAME:${RELEASE_VERSION}"
-          gcloud dataflow flex-template build "$DF_TEMPLATE_PATH" \
-            --image="$IMG" \
+          echo "DF_TEMPLATE_PATH=gs://the-gcs-template-path/synthetic/sdfb-${RELEASE_VERSION}-template.json" >> $GITHUB_ENV
+
+      - name: "Copy conf files to GCS"
+        run: |
+          gsutil -m rsync -r -d config/ "gs://the-gcs-bucket/synthetic/${RELEASE_VERSION}/"
+
+      - name: "Build ${{ env.BUILD_TYPE }} flex-template for env: ${{ env.ENV_NAME }}"
+        env:
+          PROJECT_ID: ${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}
+        run: |-
+          IMG="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${IMAGE_NAME}:${RELEASE_VERSION}"
+          echo "Creating Dataflow Flex Template at: ${DF_TEMPLATE_PATH}"
+          echo "Backing image: ${IMG}"
+
+          gcloud dataflow flex-template build "${DF_TEMPLATE_PATH}" \
+            --image="${IMG}" \
             --image-repository-username-secret-id="projects/${PROJECT_ID}/secrets/ARTIFACTORY_RELEASER_USERNAME" \
             --image-repository-password-secret-id="projects/${PROJECT_ID}/secrets/ARTIFACTORY_RELEASER_PASSWORD" \
             --sdk-language=PYTHON \
-            --metadata-file=docker/flex_template_metadata.json \
-            --staging-location="gs://<BUCKET_PREFIX>-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/staging" \
-            --temp-location="gs://<BUCKET_PREFIX>-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/temp" \
-            --dataflow-kms-key="projects/${{ steps.env.outputs.KEYS_PROJECT }}/locations/${REGION}/keyRings/gcp_dataflow/cryptoKeys/<DATAFLOW_EKM_KEY>"
-          echo "Template published: $DF_TEMPLATE_PATH"
+            --staging-location="gs://db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/staging" \
+            --temp-location="gs://db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/temp" \
+            --dataflow-kms-key="projects/${KEYS_PROJECT_ID}/locations/${REGION}/keyRings/a_crypto_key"
+          echo "Template published: ${DF_TEMPLATE_PATH}"

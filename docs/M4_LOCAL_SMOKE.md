@@ -7,7 +7,7 @@ Fast iteration loop on the M4 against a **real** LLM, no Dataflow time, no GPU i
 ```bash
 # one-time per machine
 uv sync --package sdfb-beam --extra mlx   # installs mlx + mlx-lm on Apple Silicon
-mkdir -p models/gemma4/e4b/v1             # see MODEL_LAYOUT.md for the Kaggle download
+mkdir -p models/gemma4/e4b-it/v1             # see MODEL_LAYOUT.md for the Kaggle download
 
 # smoke test — uses your real _ddl.json
 uv run python scripts/hello_synthetic_mlx.py \
@@ -15,7 +15,7 @@ uv run python scripts/hello_synthetic_mlx.py \
     --reference_table CDH_dataset.KW860T_RR \
     --reference_limit 5 \
     --num_rows 10 \
-    --model_path ./models/gemma4/e4b/v1/
+    --model_path ./models/gemma4/e4b-it/v1/
 ```
 
 Output: `output/<table>/hello_synthetic_mlx.jsonl` — one valid synthetic row per line.
@@ -44,24 +44,33 @@ Cost: ~30s model load + ~1–2s per row (on M4 24GB w/ Gemma 4 E4B).
 
 ### L3 — full DirectRunner + MLX through the pipeline
 
+> **⚠️ NOT RUNNABLE YET — blocked on §6/§7.** `ENGINE_REGISTRY` is empty: the
+> `b1_rag` / `b2_library` engines live in their worktrees (`worktrees/b1-rag`,
+> `worktrees/b2-library`) and haven't merged to `main`. `get_engine("b1_rag")`
+> raises `Unknown engine 'b1_rag'. Available: []` inside the generation DoFn's
+> `setup()`. The command below is the **correct shape** for when an engine lands.
+
 ```bash
 uv run python -m sdfb_beam.cli.run_pipeline \
     --runner DirectRunner \
     --client_type mlx \
     --ddl_uri output/CDH_dataset/ddl_metadata_CDH_dataset_KW860T_RR.json \
-    --reference_table cdh_dataset.synthetic_data \
-    --landing_table /tmp/sdfb_landing \
-    --dlq_table /tmp/sdfb_dlq \
+    --reference_table CDH_dataset.KW860T_RR \
+    --landing_table <project>.<dataset>.sdfb_landing \
+    --dlq_table <project>.<dataset>.sdfb_dlq \
     --num_rows 20 \
     --batch_size 4 \
     --run_id m4-smoke-001 \
     --engine b1_rag \
-    --model_uri ./models/gemma4/e4b/v1/
+    --model_uri ./models/gemma4/e4b-it/v1/
 ```
 
-Validates: end-to-end DAG including generation DoFn, ValidateRecordDoFn, PanderaValidateBatchDoFn, DLQ routing — but with a real LLM instead of the FakeModelClient. The only thing missing vs production: vLLM (CUDA-only), L4 GPU, BigQuery sinks (would need a real BQ table).
+Three things the doc's old command got wrong (now fixed above), worth understanding:
+- `--reference_table` must be the **same table the DDL describes** (`CDH_dataset.KW860T_RR`), or the reference rows won't match the schema.
+- `--landing_table` / `--dlq_table` are **real BigQuery tables** (`project.dataset.table`), not local paths — `run_pipeline.py` wires them into `WriteToBigQuery(create_disposition=CREATE_NEVER)`, so they must pre-exist. There is no local-file sink; even DirectRunner writes to BQ (needs creds).
+- `--model_uri` is the **`-it`** variant (the base has no chat template).
 
-**Note**: B.1 RAG and B.2 library engines don't exist yet; once they land in their worktrees, this layer becomes meaningful.
+Validates: end-to-end DAG including generation DoFn, ValidateRecordDoFn, PanderaValidateBatchDoFn, DLQ routing — but with a real LLM instead of FakeModelClient. Missing vs production: vLLM (CUDA-only), L4 GPU. Given it needs real BQ tables + an engine anyway, in practice the full DAG is validated on **Dataflow (§11)**, not DirectRunner-local.
 
 ## What this does NOT validate
 
@@ -84,14 +93,14 @@ The extra carries `sys_platform == 'darwin' and platform_machine == 'arm64'` mar
 
 ### 2. Get Gemma 4 E4B weights
 
-Follow [`MODEL_LAYOUT.md`](MODEL_LAYOUT.md) § "How to download" — pull from Kaggle, extract to `models/gemma4/e4b/v1/`. MLX reads the HF-layout safetensors directly.
+Follow [`MODEL_LAYOUT.md`](MODEL_LAYOUT.md) § "How to download" — pull from Kaggle, extract to `models/gemma4/e4b-it/v1/`. MLX reads the HF-layout safetensors directly.
 
 ### 3. Verify MLX can see the model
 
 ```bash
 uv run python -c "
 from mlx_lm import load
-model, tok = load('./models/gemma4/e4b/v1/')
+model, tok = load('./models/gemma4/e4b-it/v1/')
 print('OK', type(model).__name__, type(tok).__name__)
 "
 ```

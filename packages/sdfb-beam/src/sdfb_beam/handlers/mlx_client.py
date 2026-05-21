@@ -35,7 +35,7 @@ class MLXModelClient:
     Gemma 4's native function-calling training + post-validate-and-retry.
 
     Lifecycle:
-        c = MLXModelClient(model_uri="./models/gemma4/e4b/v1/")
+        c = MLXModelClient(model_uri="./models/gemma4/e4b-it/v1/")
         c.setup()                       # downloads / loads model (~30s)
         rows = c.generate_json(prompt, schema, n=5)
     """
@@ -208,41 +208,46 @@ class MLXModelClient:
             if text[i] != "{":
                 i += 1
                 continue
-            # Candidate object start at i. Walk to its balanced close, tracking
-            # string state so that braces inside "..." values don't count.
-            depth = 0
-            in_str = False
-            escaped = False
-            close = -1
-            for j in range(i, n):
-                ch = text[j]
-                if in_str:
-                    if escaped:
-                        escaped = False
-                    elif ch == "\\":
-                        escaped = True
-                    elif ch == '"':
-                        in_str = False
-                    continue
-                if ch == '"':
-                    in_str = True
-                elif ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        close = j
-                        break
+            close = MLXModelClient._find_balanced_close(text, i)
             if close == -1:
                 # No balanced close — truncated. No later '{' can do better.
                 return None
-            candidate = text[i : close + 1]
-            parsed = MLXModelClient._loads_lenient(candidate)
+            parsed = MLXModelClient._loads_lenient(text[i : close + 1])
             if isinstance(parsed, dict):
                 return parsed
             # This span didn't parse to a dict; try the next '{' to the right.
             i += 1
         return None
+
+    @staticmethod
+    def _find_balanced_close(text: str, start: int) -> int:
+        """Index of the `}` that closes the `{` at `start`, or -1 if unbalanced.
+
+        String-aware: braces inside `"..."` values (and escaped quotes) don't
+        affect nesting depth.
+        """
+        depth = 0
+        in_str = False
+        escaped = False
+        for j in range(start, len(text)):
+            ch = text[j]
+            if in_str:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return j
+        return -1
 
     @staticmethod
     def _loads_lenient(candidate: str) -> Any | None:

@@ -15,7 +15,7 @@ def _common_args() -> list[str]:
         "--dlq_table", "p.d.dlq",
         "--num_rows", "100",
         "--run_id", "abc-123",
-        "--model_uri", "gs://bucket/models/gemma4/e4b/v1/",
+        "--model_uri", "gs://bucket/models/gemma4/e4b-it/v1/",
     ]
 
 

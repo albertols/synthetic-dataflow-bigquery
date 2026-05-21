@@ -1,11 +1,15 @@
 # Model registry for the synthesis pipeline.
 #
-# The `--model_uri` Dataflow flag picks one entry by key (e.g. `--model=gemma4_e4b`).
-# Worker `setup()` does `gsutil -m cp -r <uri>/ /local-ssd/model/` and vLLM loads
-# from there. See docs/MODEL_LAYOUT.md for the on-GCS file checklist.
+# This file is a REGISTRY/REFERENCE — it documents which models exist, their
+# canonical GCS layout, vLLM kwargs, GPU memory, and license. The pipeline's
+# `--model_uri` flag takes a FULL gs:// URI (not a key); at runtime that URI
+# comes from the `SDFB_MODEL_URI` Composer Variable (set per-env, see
+# composer/synthetic_beam_bigquery.py + workflow 3). Operators pick a model by
+# pointing that Variable at the matching `gcs_uri` below.
 #
-# Single source of truth for: GCS URI, vLLM kwargs, expected GPU memory, license.
-# DO NOT recopy these values into scripts — read this file.
+# Worker `setup()` pulls the weights via the google-cloud-storage Python client
+# (NOT gsutil — see ADR 0012) and vLLM loads from /local-ssd/model. See
+# docs/MODEL_LAYOUT.md for the on-GCS file checklist.
 
 defaults:
   family: gemma4
@@ -17,7 +21,7 @@ models:
   gemma4_e4b:
     # M1 §11 first pass — fast iteration, fits anywhere.
     description: Gemma 4 E4B Instruct (4.5B effective params, 128K context). Dev / cost-floor.
-    gcs_uri: "gs://{project}-models/gemma4/e4b/v1/"
+    gcs_uri: "gs://{bucket}/synthetic/models/gemma4/e4b-it/v1/"
     quantization: null            # FP16
     expected_vram_gb: 9
     license: gemma-tos
@@ -32,18 +36,21 @@ models:
   gemma4_26b_a4b_awq:
     # M1 §11 primary production target — MoE, Q4-AWQ for single-L4 fit.
     description: Gemma 4 26B A4B MoE, Q4-AWQ. Activates ~3.8B/token. Primary production.
-    gcs_uri: "gs://{project}-models/gemma4/26b-a4b-awq/v1/"
+    # MUST be the instruction-tuned variant (same lesson as e4b — the base has
+    # no chat template and won't follow JSON-output instructions). Verify the
+    # exact Kaggle IT-AWQ slug + path before staging; placeholder below.
+    gcs_uri: "gs://{bucket}/synthetic/models/gemma4/26b-a4b-awq/v1/"
     quantization: awq
     expected_vram_gb: 16
     license: gemma-tos
     source: kaggle
     download_hint: |
-      kaggle models instances versions download google/gemma-4/transformers/26b-a4b-awq/1
+      kaggle models instances versions download google/gemma-4/transformers/26b-a4b-awq/1  # TODO: confirm -it slug
 
   qwen2_5_7b_it:
     # Optional cross-family comparison. Not in M1 critical path.
     description: Qwen 2.5 7B Instruct, 128K context. Apache-2.0 fallback.
-    gcs_uri: "gs://{project}-models/qwen2.5/7b-it/v1/"
+    gcs_uri: "gs://{bucket}/synthetic/models/qwen2.5/7b-it/v1/"
     quantization: null
     expected_vram_gb: 14
     license: apache-2.0
@@ -55,6 +62,6 @@ models:
 embedders:
   bge_small_en_v1_5:
     description: BAAI/bge-small-en-v1.5 — small, fast, OK quality. Mirrored to GCS.
-    gcs_uri: "gs://{project}-models/embedders/bge-small-en-v1.5/v1/"
+    gcs_uri: "gs://{bucket}/synthetic/models/embedders/bge-small-en-v1.5/v1/"
     dim: 384
     license: mit

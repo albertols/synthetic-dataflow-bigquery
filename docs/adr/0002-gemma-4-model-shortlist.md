@@ -14,6 +14,8 @@ M1 production target is **Gemma 4 26B A4B MoE, Q4-AWQ** (primary). Dev / cost-fl
 
 Dropped from the shortlist: Gemma 2 family (superseded), Phi-3 Mini (superseded by Gemma 4 E4B), Gemma 4 31B Dense + Llama 70B (no headroom on single L4 — A100 lane is M3+).
 
+> **Amendment (2026-05-21):** the GCS layout convention above evolved to `gs://{bucket}/synthetic/models/{family}/{model}/{version}/` (shared bucket + `synthetic/` app-prefix) to match the deploy workflows; the `{project}-models` path is superseded. Also: the dev model is the **`-it`** (instruction-tuned) variant — the base ships no chat template. The model *selection* (this ADR's decision) is unchanged; see `docs/MODEL_LAYOUT.md` + `config/models.yml` for the current layout.
+
 ## Consequences
 
 - **Enables**: schema-conformant generation with much less prompt engineering; the 256K context unlocks RAG-with-many-exemplars for B.1.

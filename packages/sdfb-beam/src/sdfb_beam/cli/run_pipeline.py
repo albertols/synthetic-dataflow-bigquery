@@ -65,7 +65,7 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     p.add_argument("--engine", default="b1_rag",
                    help="Engine name registered in ENGINE_REGISTRY")
     p.add_argument("--model_uri", required=True,
-                   help="gs://<project>-models/<family>/<model>/<version>/")
+                   help="gs://<bucket>/synthetic/models/<family>/<model>/<version>/")
     p.add_argument("--client_type", default="vllm",
                    choices=["vllm", "mlx", "fake"])
     return p.parse_known_args(argv)
