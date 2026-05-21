@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from airflow import models
 from airflow.models import Variable
+from airflow.models.param import Param
 from airflow.providers.google.cloud.operators.dataflow import (
     DataflowStartFlexTemplateOperator,
 )
@@ -64,34 +65,36 @@ network_tags_chain = (
 )
 # -----------------------------------------------------------------------------
 # DAG params — runtime-overridable on every trigger.
+# Using Param objects so {{ params.X }} resolves to the VALUE, not the definition.
+# All values are strings because Dataflow Flex Template parameters are strings.
 # -----------------------------------------------------------------------------
 default_dag_params = {
-    "table_fqn": {
-        "type": "string",
-        "default": default_table_fqn,
-        "description": "FQN of the source BigQuery table to clone.",
-    },
-    "num_rows": {
-        "type": "integer",
-        "default": 1000,
-        "description": "Number of synthetic rows to generate.",
-    },
-    "engine": {
-        "type": "string",
-        "default": "b1_rag",
-        "enum": ["b1_rag", "b2_library"],
-        "description": "Generation engine.",
-    },
-    "batch_size": {
-        "type": "integer",
-        "default": 16,
-        "description": "Records per LLM batch.",
-    },
-    "similarity": {
-        "type": "number",
-        "default": 0.5,
-        "description": "Similarity to reference (0.0 random → 1.0 mimic).",
-    },
+    "table_fqn": Param(
+        default=default_table_fqn,
+        type="string",
+        description="FQN of the source BigQuery table to clone.",
+    ),
+    "num_rows": Param(
+        default="1000",
+        type="string",
+        description="Number of synthetic rows to generate.",
+    ),
+    "engine": Param(
+        default="b1_rag",
+        type="string",
+        enum=["b1_rag", "b2_library"],
+        description="Generation engine.",
+    ),
+    "batch_size": Param(
+        default="16",
+        type="string",
+        description="Records per LLM batch.",
+    ),
+    "similarity": Param(
+        default="0.5",
+        type="string",
+        description="Similarity to reference (0.0 random → 1.0 mimic).",
+    ),
 }
 
 with models.DAG(
