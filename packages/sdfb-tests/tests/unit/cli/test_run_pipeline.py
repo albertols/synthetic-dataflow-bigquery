@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import pytest
-
-from sdfb_beam.cli.run_pipeline import build_model_client, parse_args
+from apache_beam.options.pipeline_options import (
+    GoogleCloudOptions,
+    PipelineOptions,
+    SetupOptions,
+)
+from sdfb_beam.cli.run_pipeline import (
+    build_model_client,
+    configure_pipeline_options,
+    parse_args,
+)
 
 
 def _common_args() -> list[str]:
@@ -77,3 +85,17 @@ def test_build_model_client_vllm_stub_does_not_fail_on_import():
 def test_build_model_client_rejects_unknown():
     with pytest.raises(ValueError, match="Unknown client_type"):
         build_model_client("openai", "ignored")
+
+
+def test_configure_options_directrunner_sets_save_main_session():
+    """Regression: save_main_session lives on SetupOptions, not GoogleCloudOptions."""
+    opts = PipelineOptions(["--runner=DirectRunner"])
+    configure_pipeline_options(opts, "DirectRunner", "r1")
+    assert opts.view_as(SetupOptions).save_main_session is True
+
+
+def test_configure_options_dataflow_sets_job_name_not_save_main_session():
+    opts = PipelineOptions(["--runner=DataflowRunner"])
+    configure_pipeline_options(opts, "DataflowRunner", "abc-123")
+    assert opts.view_as(SetupOptions).save_main_session is False
+    assert opts.view_as(GoogleCloudOptions).job_name == "sdfb-abc-123"

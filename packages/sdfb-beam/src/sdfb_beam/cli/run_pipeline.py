@@ -34,6 +34,7 @@ from apache_beam.io.gcp.bigquery import BigQueryDisposition, WriteToBigQuery
 from apache_beam.options.pipeline_options import (
     GoogleCloudOptions,
     PipelineOptions,
+    SetupOptions,
     StandardOptions,
 )
 from sdfb_core.contracts import TableSchema
@@ -117,6 +118,20 @@ def load_ddl(ddl_uri: str) -> TableSchema:
         return TableSchema.model_validate(json.loads(f.read()))
 
 
+def configure_pipeline_options(
+    options: PipelineOptions, runner: str, run_id: str
+) -> None:
+    """Set runner-dependent options.
+
+    ``save_main_session`` lives on ``SetupOptions`` (NOT ``GoogleCloudOptions``);
+    True only for DirectRunner ad-hoc runs — on Dataflow the image bakes in
+    deps + source, so it just adds startup cost.
+    """
+    options.view_as(SetupOptions).save_main_session = runner == "DirectRunner"
+    if runner == "DataflowRunner":
+        options.view_as(GoogleCloudOptions).job_name = f"sdfb-{run_id}"
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -127,12 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     options = PipelineOptions(beam_argv)
     runner = options.view_as(StandardOptions).runner or "DataflowRunner"
 
-    # save_main_session=True is needed only for DirectRunner ad-hoc; on
-    # Dataflow the image bakes in deps + source so it adds startup cost
-    # without value.
-    options.view_as(GoogleCloudOptions).save_main_session = (runner == "DirectRunner")
-    if runner == "DataflowRunner":
-        options.view_as(GoogleCloudOptions).job_name = f"sdfb-{args.run_id}"
+    configure_pipeline_options(options, runner, args.run_id)
 
     logger.info("Loading DDL from %s", args.ddl_uri)
     table_schema = load_ddl(args.ddl_uri)
