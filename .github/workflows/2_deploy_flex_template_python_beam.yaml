@@ -140,3 +140,15 @@ jobs:
             --temp-location="gs://db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/temp" \
             --dataflow-kms-key="projects/${KEYS_PROJECT_ID}/locations/${REGION}/keyRings/a_crypto_key"
           echo "Template published: ${DF_TEMPLATE_PATH}"
+
+      - name: "Publish stable sdfb-latest-template.json pointer (Development)"
+        if: ${{ env.BUILD_TYPE == 'Development' }}
+        run: |
+          # The flex-template JSON is the indirection layer — it embeds the
+          # immutable :<branch>-<sha> image. Copying it to a stable GCS name lets
+          # workflow 3 / the DAG reference 'sdfb-latest-template.json' without
+          # knowing the sha. GCS overwrite is allowed (unlike the immutable docker
+          # repo), so 'latest' lives here, not as a docker tag.
+          LATEST_PATH="gs://the-gcs-template-path/synthetic/sdfb-latest-template.json"
+          gsutil cp "${DF_TEMPLATE_PATH}" "${LATEST_PATH}"
+          echo "Stable pointer updated: ${LATEST_PATH} -> image :${RELEASE_VERSION}"

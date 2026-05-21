@@ -25,6 +25,13 @@ from typing import Any
 import apache_beam as beam
 from sdfb_core.contracts import TableSchema
 from sdfb_core.engines import GenerationContext, ModelClient
+from sdfb_core.validation import (
+    STATUS_FAILED_BLOCKER,
+    BlockerThresholdExceeded,
+    Thresholds,
+    build_run_summary,
+    normalize_dlq_record,
+)
 
 from sdfb_beam.dofns import (
     GenerateRecordsDoFn,
@@ -56,6 +63,11 @@ class PipelineConfig:
     # B.1's embedder. Empty ⇒ the engine uses its dependency-free default.
     model_uri: str = ""
     embedder_uri: str = ""
+    # §12 — Mode-A run-level gate + provenance for synthetic_data_quality.
+    reference_table: str = ""
+    landing_table: str = ""
+    thresholds: Thresholds | None = None
+    fail_on_blocker: bool = True
 
 
 def build_pipeline(
@@ -65,6 +77,7 @@ def build_pipeline(
     config: PipelineConfig,
     landing_sink: beam.PTransform,
     dlq_sink: beam.PTransform,
+    validation_runs_sink: beam.PTransform | None = None,
 ) -> dict[str, Any]:
     """Wire the synthesis DAG onto an existing Beam Pipeline.
 
@@ -128,16 +141,103 @@ def build_pipeline(
     # Landing sink — valid records only.
     _ = batch_validated.main | "WriteLanding" >> landing_sink
 
-    # DLQ sink — flatten the three failure tags.
-    dlq = (
+    # DLQ — flatten the three failure tags, then normalize the heterogeneous
+    # envelopes into the uniform dead_letter schema before writing.
+    dlq_raw = (
         (generated.failed, record_validated.invalid, batch_validated.invalid)
         | "FlattenDLQ" >> beam.Flatten()
     )
+    dlq = dlq_raw | "NormalizeDLQ" >> beam.Map(
+        normalize_dlq_record, run_id=config.run_id
+    )
     _ = dlq | "WriteDLQ" >> dlq_sink
 
-    return {
+    result: dict[str, Any] = {
         "reference_digest": digest,
         "run_id": config.run_id,
         "valid": batch_validated.main,
         "dlq": dlq,
     }
+
+    # §12 — run-level summary row + BLOCKER gate. Only wired when a
+    # validation_runs sink is supplied; happy-path DirectRunner tests that
+    # don't assert run metadata omit it.
+    if validation_runs_sink is not None:
+        thresholds = config.thresholds or Thresholds(
+            env="dev", blocker_failure_ratio=1.0
+        )
+        valid_count = (
+            batch_validated.main | "CountValid" >> beam.combiners.Count.Globally()
+        )
+        dlq_by_rule = (
+            dlq_raw
+            | "DlqRulePairs" >> beam.Map(lambda d: (d.get("rule_id", "unknown"), 1))
+            | "DlqRuleCounts" >> beam.CombinePerKey(sum)
+            | "DlqRuleDict" >> beam.combiners.ToDict()
+        )
+        summary_rows = (
+            p
+            | "SummarySeed" >> beam.Create([None])
+            | "BuildValidationRun" >> beam.Map(
+                _build_validation_run_row,
+                valid_count=beam.pvalue.AsSingleton(valid_count),
+                dlq_by_rule=beam.pvalue.AsSingleton(dlq_by_rule),
+                thresholds=thresholds,
+                run_id=config.run_id,
+                reference_digest=digest,
+                num_rows=config.num_rows,
+                reference_table=config.reference_table,
+                landing_table=config.landing_table,
+                engine=config.engine_name,
+                model_uri=config.model_uri,
+            )
+        )
+        _ = summary_rows | "WriteValidationRun" >> validation_runs_sink
+        if config.fail_on_blocker:
+            _ = summary_rows | "BlockerGate" >> beam.ParDo(_BlockerGateDoFn())
+        result["validation_run"] = summary_rows
+
+    return result
+
+
+def _build_validation_run_row(
+    _seed,
+    *,
+    valid_count: int,
+    dlq_by_rule: dict[str, int],
+    thresholds: Thresholds,
+    run_id: str,
+    reference_digest: str,
+    num_rows: int,
+    reference_table: str,
+    landing_table: str,
+    engine: str,
+    model_uri: str,
+) -> dict:
+    """Driver of the single validation_runs row (side inputs are singletons)."""
+    summary = build_run_summary(
+        run_id=run_id,
+        reference_digest=reference_digest,
+        valid_count=valid_count,
+        dlq_by_rule=dlq_by_rule,
+        thresholds=thresholds,
+        num_rows_requested=num_rows,
+        reference_table=reference_table,
+        landing_table=landing_table,
+        engine=engine,
+        model_uri=model_uri,
+    )
+    return summary.to_bq_row()
+
+
+class _BlockerGateDoFn(beam.DoFn):
+    """Fails the Dataflow job when the run summary tripped the BLOCKER gate."""
+
+    def process(self, row: dict):
+        if row.get("status") == STATUS_FAILED_BLOCKER:
+            raise BlockerThresholdExceeded(
+                f"run_id={row.get('run_id')} blocker_count={row.get('blocker_count')} "
+                f"observed={row.get('observed_blocker_ratio')} > "
+                f"gate={row.get('blocker_failure_ratio')} (env={row.get('env')})"
+            )
+        yield row

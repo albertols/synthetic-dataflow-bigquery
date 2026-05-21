@@ -17,8 +17,8 @@ defaults:
   # whole Dataflow job is failed. Stricter in prod.
   blocker_failure_ratio:
     dev: 0.20
-    staging: 0.05
-    prod: 0.01
+    uat: 0.05
+    prd: 0.01
 
 rules:
   schema.types:
@@ -46,8 +46,8 @@ rules:
     severity: MAJOR
     threshold:
       dev: 0.10
-      staging: 0.07
-      prod: 0.05    # ≤ 5% null on NULLABLE columns
+      uat: 0.07
+      prd: 0.05    # ≤ 5% null on NULLABLE columns
 
   range.numeric:
     dimension: validity

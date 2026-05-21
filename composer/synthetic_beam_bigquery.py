@@ -17,6 +17,7 @@ Substitution markers (workflow 3 seds these at import time):
   {{SDFB_DDL_URI}}            gs://…/ddl.json
   {{SDFB_LANDING_TABLE}}      project.synthetic_data.landing
   {{SDFB_DLQ_TABLE}}          project.synthetic_data_quality.dlq
+  {{SDFB_VALIDATION_RUNS_TABLE}} project.synthetic_data_quality.validation_runs
 
 Runtime values: Airflow DAG params ({{ params.* }}: table_fqn, num_rows,
 engine, batch_size, similarity) + Composer Variables for infra (PROJECT_ID,
@@ -45,6 +46,7 @@ templates_path = "{{GCS_DATAFLOW_TEMPLATES}}"   # …-dataflow-templates
 model_uri = "{{SDFB_MODEL_URI}}"                # gs://<bucket>/synthetic/models/gemma4/e4b-it/v1/
 embedder_uri = "{{SDFB_EMBEDDER_URI}}"          # B.1 embedder; empty ⇒ HashingEmbedder
 default_table_fqn = "{{SDFB_DEFAULT_TABLE_FQN}}"
+validation_runs_table = "{{SDFB_VALIDATION_RUNS_TABLE}}"  # synthetic_data_quality.validation_runs
 
 # -----------------------------------------------------------------------------
 # Runtime infra — Composer Variables, set once per env (not build-time-baked).
@@ -166,6 +168,8 @@ with models.DAG(
                     "engine": "{{ params.engine }}",
                     "model_uri": model_uri,
                     "embedder_uri": embedder_uri,
+                    "validation_runs_table": validation_runs_table,
+                    "env": env_name,
                     "client_type": "vllm",
                 },
             }

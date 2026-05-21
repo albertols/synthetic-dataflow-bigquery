@@ -141,8 +141,7 @@ jobs:
                   --platform=linux/amd64 \
                   -f docker/Dockerfile \
                   -t "$IMG:$RELEASE_VERSION" \
-                  -t "$IMG:latest" \
-                  --cache-from "$IMG:latest" \
+                  --cache-from "$IMG:$RELEASE_VERSION" \
                   --build-arg ENV_NAME_ARG=$ENV_NAME \
                   --build-arg ARTIFACTORY_HOSTNAME_ARG=$ARTIFACTORY_HOSTNAME \
                   --build-arg ARTIFACTORY_RELEASER_USERNAME_ARG=$ARTIFACTORY_RELEASER_USERNAME \
@@ -152,9 +151,13 @@ jobs:
                 
                 docker images | head -20
                 
+                # dkr-public-local is an immutable/promote repo: re-pushing an
+                # existing tag needs DELETE perm (CI lacks it), so we never push a
+                # mutable ':latest'. The immutable ':<branch>-<sha>' tag is the sole
+                # alignment key; the stable pointer lives in GCS as
+                # sdfb-latest-template.json (workflow 2), where overwrite IS allowed.
                 echo "Pushing → ${IMG}:${RELEASE_VERSION}"
                 docker push "${IMG}:${RELEASE_VERSION}"
-                docker push "${IMG}:latest"
 
             - name: "Push wheel to JFrog pypi (optional)"
               if: ${{ inputs.push_to_artifactory }}

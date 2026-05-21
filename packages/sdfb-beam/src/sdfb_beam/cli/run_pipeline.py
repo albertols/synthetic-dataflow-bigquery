@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 import apache_beam as beam
 import sdfb_core.engines  # noqa: F401  populates ENGINE_REGISTRY at import time
+import yaml
 from apache_beam.io.filesystems import FileSystems
 from apache_beam.io.gcp.bigquery import BigQueryDisposition, WriteToBigQuery
 from apache_beam.options.pipeline_options import (
@@ -36,6 +37,7 @@ from apache_beam.options.pipeline_options import (
     StandardOptions,
 )
 from sdfb_core.contracts import TableSchema
+from sdfb_core.validation import Thresholds
 
 from sdfb_beam.io.bq_sources import load_reference_rows
 from sdfb_beam.pipeline import PipelineConfig, build_pipeline
@@ -68,9 +70,30 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     p.add_argument("--embedder_uri", default="",
                    help="gs://<bucket>/synthetic/models/embedders/<model>/<version>/ "
                         "for the B.1 RAG embedder (optional; empty → HashingEmbedder)")
+    p.add_argument("--validation_runs_table", default="",
+                   help="BQ table for the run-level summary row "
+                        "(project.dataset.table); empty skips the write")
+    p.add_argument("--env", default="dev",
+                   help="Environment tier selecting thresholds (dev|uat|prd)")
+    p.add_argument("--thresholds_uri", default="config/thresholds.yml",
+                   help="gs:// or local path to thresholds.yml")
     p.add_argument("--client_type", default="vllm",
                    choices=["vllm", "mlx", "fake"])
     return p.parse_known_args(argv)
+
+
+def resolve_thresholds(thresholds_uri: str, env: str) -> Thresholds:
+    """Load thresholds.yml; fall back to a permissive gate if unavailable."""
+    try:
+        with FileSystems.open(thresholds_uri) as f:
+            data = yaml.safe_load(f.read())
+        return Thresholds.from_mapping(data, env)
+    except Exception as e:
+        logger.warning(
+            "Could not load thresholds from %s (%s); using permissive gate",
+            thresholds_uri, e,
+        )
+        return Thresholds(env=env, blocker_failure_ratio=1.0)
 
 
 def build_model_client(client_type: str, model_uri: str) -> ModelClient:
@@ -126,6 +149,10 @@ def main(argv: list[str] | None = None) -> int:
         limit=args.reference_rows_limit,
     )
 
+    thresholds = resolve_thresholds(args.thresholds_uri, args.env)
+    logger.info("Thresholds (env=%s): blocker_failure_ratio=%.4f",
+                thresholds.env, thresholds.blocker_failure_ratio)
+
     config = PipelineConfig(
         table_schema=table_schema,
         engine_name=args.engine,
@@ -136,6 +163,9 @@ def main(argv: list[str] | None = None) -> int:
         run_id=args.run_id,
         model_uri=args.model_uri,
         embedder_uri=args.embedder_uri,
+        reference_table=args.reference_table,
+        landing_table=args.landing_table,
+        thresholds=thresholds,
     )
 
     landing_sink = WriteToBigQuery(
@@ -150,6 +180,14 @@ def main(argv: list[str] | None = None) -> int:
         write_disposition=BigQueryDisposition.WRITE_APPEND,
         create_disposition=BigQueryDisposition.CREATE_NEVER,
     )
+    validation_runs_sink = None
+    if args.validation_runs_table:
+        validation_runs_sink = WriteToBigQuery(
+            table=args.validation_runs_table,
+            method=WriteToBigQuery.Method.FILE_LOADS,
+            write_disposition=BigQueryDisposition.WRITE_APPEND,
+            create_disposition=BigQueryDisposition.CREATE_NEVER,
+        )
 
     with beam.Pipeline(options=options) as p:
         result = build_pipeline(
@@ -158,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
             config=config,
             landing_sink=landing_sink,
             dlq_sink=dlq_sink,
+            validation_runs_sink=validation_runs_sink,
         )
         logger.info(
             "Pipeline launched: run_id=%s reference_digest=%s",

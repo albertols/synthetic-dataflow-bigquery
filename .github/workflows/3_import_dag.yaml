@@ -51,6 +51,11 @@ on:
         description: "DLQ BigQuery table (the-dev-project.synthetic_data.sdfb_dlq)"
         required: true
         default: "the-dev-project.synthetic_data.sdfb_dlq"
+      validation_runs_table:
+        type: string
+        description: "validation_runs table (the-dev-project.synthetic_data_quality.validation_runs); empty skips the write"
+        required: false
+        default: "the-dev-project.synthetic_data_quality.validation_runs"
       servicenow-implementation-task:
         type: string
         description: "ITSK/CHG Number (required only for production)"
@@ -151,9 +156,12 @@ jobs:
             # Release: use pyproject.toml version (same as workflows 1 & 2).
             VER=$(grep -m1 '^version' packages/sdfb-beam/pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
           else
-            # Development: derive branch-sha tag (same as workflows 1 & 2).
-            replaceSlashWithDash(){ echo "$1" | sed -r 's/\//-/g'; }
-            VER="$(replaceSlashWithDash "${GITHUB_REF#refs/*/}")-$(git rev-parse --short HEAD)"
+            # Development: reference the stable 'latest' flex-template that
+            # workflow 2 publishes to GCS (sdfb-latest-template.json). The template
+            # pins the immutable :<branch>-<sha> image, so the DAG never needs the
+            # sha. DAG_VERSION below stays unique via timestamp, so re-imports
+            # don't collide.
+            VER="latest"
           fi
 
           if [[ -z "$VER" ]]; then
@@ -189,6 +197,7 @@ jobs:
             -e "s|{{SDFB_DDL_URI}}|${{ inputs.ddl_uri }}|g" \
             -e "s|{{SDFB_LANDING_TABLE}}|${{ inputs.landing_table }}|g" \
             -e "s|{{SDFB_DLQ_TABLE}}|${{ inputs.dlq_table }}|g" \
+            -e "s|{{SDFB_VALIDATION_RUNS_TABLE}}|${{ inputs.validation_runs_table }}|g" \
             composer/synthetic_beam_bigquery.py
           echo "--- substituted DAG (first 75 lines) ---"
           head -75 composer/synthetic_beam_bigquery.py

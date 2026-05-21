@@ -79,6 +79,20 @@
       "regexes": ["^(gs://[^/]+/.+/|)$"]
     },
     {
+      "name": "validation_runs_table",
+      "label": "validation_runs table FQN",
+      "helpText": "Destination BigQuery table for the run-level summary row. project.dataset.table. Optional; empty skips the write.",
+      "isOptional": true,
+      "regexes": ["^([a-z0-9_-]+\\.[a-zA-Z0-9_]+\\.[a-zA-Z0-9_]+)?$"]
+    },
+    {
+      "name": "env",
+      "label": "Environment tier",
+      "helpText": "dev | uat | prd — selects the threshold tier from config/thresholds.yml.",
+      "isOptional": true,
+      "regexes": ["^(dev|uat|prd)$"]
+    },
+    {
       "name": "client_type",
       "label": "Model client type",
       "helpText": "vllm (production), mlx (M4 local smoke), fake (CI fixture).",
