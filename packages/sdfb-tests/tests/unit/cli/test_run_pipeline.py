@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from apache_beam.options.pipeline_options import (
     GoogleCloudOptions,
@@ -99,3 +101,21 @@ def test_configure_options_dataflow_sets_job_name_not_save_main_session():
     configure_pipeline_options(opts, "DataflowRunner", "abc-123")
     assert opts.view_as(SetupOptions).save_main_session is False
     assert opts.view_as(GoogleCloudOptions).job_name == "sdfb-abc-123"
+
+
+def test_configure_options_sanitizes_airflow_run_id():
+    """Regression: Airflow run_ids carry :/+/__ that Dataflow job names reject."""
+    opts = PipelineOptions(["--runner=DataflowRunner"])
+    configure_pipeline_options(opts, "DataflowRunner", "scheduled__2026-05-20T00:00:00+00:00")
+    name = opts.view_as(GoogleCloudOptions).job_name
+    assert name == "sdfb-scheduled-2026-05-20t00-00-00-00-00"
+    assert re.fullmatch(r"[a-z][-a-z0-9]*[a-z0-9]", name)  # Dataflow constraint
+
+
+def test_configure_options_preserves_launcher_job_name():
+    """The flex launcher's valid --job_name must not be overridden."""
+    opts = PipelineOptions(
+        ["--runner=DataflowRunner", "--job_name=synthetic-sdfb-vlatest-e48544ec"]
+    )
+    configure_pipeline_options(opts, "DataflowRunner", "scheduled__bad:name")
+    assert opts.view_as(GoogleCloudOptions).job_name == "synthetic-sdfb-vlatest-e48544ec"

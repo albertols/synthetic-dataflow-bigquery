@@ -91,6 +91,10 @@ RUN uv sync --frozen --no-dev --all-packages \
 COPY packages/sdfb-core/src packages/sdfb-core/src
 COPY packages/sdfb-beam/src packages/sdfb-beam/src
 
+# Runtime config read at launch from WORKDIR /workspace (run_pipeline defaults
+# --thresholds_uri to config/thresholds.yml). Also ships the bq_schemas.
+COPY config config
+
 ENV PYTHONPATH="/workspace/.venv/lib/python3.11/site-packages:/workspace/packages/sdfb-core/src:/workspace/packages/sdfb-beam/src"
 
 # NVIDIA driver mount point (populated by Dataflow's install-nvidia-driver).

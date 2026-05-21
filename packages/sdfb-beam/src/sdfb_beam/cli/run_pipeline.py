@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from typing import TYPE_CHECKING
 
@@ -118,6 +119,15 @@ def load_ddl(ddl_uri: str) -> TableSchema:
         return TableSchema.model_validate(json.loads(f.read()))
 
 
+def sanitize_job_name(prefix: str, run_id: str) -> str:
+    """Build a Dataflow-legal job name: ``[-a-z0-9]``, starts with a letter,
+    ends alphanumeric, ≤63 chars. Airflow run_ids carry ``:`` / ``+`` / ``__``
+    (e.g. ``scheduled__2026-05-20T00:00:00+00:00``) that are all illegal."""
+    slug = re.sub(r"[^a-z0-9]+", "-", run_id.lower()).strip("-")
+    name = f"{prefix}-{slug}" if slug else prefix
+    return name[:63].rstrip("-")
+
+
 def configure_pipeline_options(
     options: PipelineOptions, runner: str, run_id: str
 ) -> None:
@@ -126,10 +136,16 @@ def configure_pipeline_options(
     ``save_main_session`` lives on ``SetupOptions`` (NOT ``GoogleCloudOptions``);
     True only for DirectRunner ad-hoc runs — on Dataflow the image bakes in
     deps + source, so it just adds startup cost.
+
+    The flex launcher already passes a valid ``--job_name`` (from the DAG's
+    ``jobName``), so we only synthesize one — sanitized from ``run_id`` — when
+    it's absent (e.g. a direct DataflowRunner launch).
     """
     options.view_as(SetupOptions).save_main_session = runner == "DirectRunner"
     if runner == "DataflowRunner":
-        options.view_as(GoogleCloudOptions).job_name = f"sdfb-{run_id}"
+        gco = options.view_as(GoogleCloudOptions)
+        if not gco.job_name:
+            gco.job_name = sanitize_job_name("sdfb", run_id)
 
 
 def main(argv: list[str] | None = None) -> int:
