@@ -65,3 +65,20 @@ embedders:
     gcs_uri: "gs://{bucket}/synthetic/models/embedders/bge-small-en-v1.5/v1/"
     dim: 384
     license: mit
+
+# B.2 library-wrapper engine (M1 §6). Statistical synthesizer fitted on
+# reference rows; the LLM patches free-text columns only. See ADR 0013.
+b2_library:
+  sdgx:
+    description: >-
+      hitsz-ids/synthetic-data-generator. CTGAN-family tabular synthesizer
+      fitted once per worker on reference_rows; vectorized sampling at
+      generate_batch. CPU-fittable, in-memory DataFrameConnector (no disk).
+    package: sdgx
+    version_spec: ">=0.2.0"      # mirror of sdfb-beam [library] extra pin
+    model: CTGANSynthesizerModel
+    default_epochs: 100
+    license: apache-2.0
+    source: pypi                 # via the corporate JFrog pypi-all proxy
+    fallback_backend: empirical_numpy
+    deferred_upgrade: "sdv.GaussianCopulaSynthesizer (BSL-1.1)"

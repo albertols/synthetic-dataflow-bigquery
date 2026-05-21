@@ -9,6 +9,7 @@ readme = { content-type = "text/markdown", text = "Pure-Python core. No Beam, no
 dependencies = [
     "pydantic>=2.7,<3.0",
     "pyyaml>=6.0",
+    "numpy>=1.26",  # vectorized bulk sampling — distribution-estimator spine (ADR 0013)
 ]
 
 [build-system]

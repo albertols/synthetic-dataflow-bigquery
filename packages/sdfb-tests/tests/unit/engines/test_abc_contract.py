@@ -17,21 +17,30 @@ Contract (from `.claude/skills/engine-contract.md`):
 from __future__ import annotations
 
 import pytest
-
 from sdfb_core.contracts import GeneratedRecord, TableSchema
 from sdfb_core.engines import GenerationConfig, GenerationContext, ModelClient
+from sdfb_core.engines.b1_rag import B1RagEngine
+from sdfb_core.engines.b2_library import B2LibraryEngine
 from sdfb_tests.fakes import FakeModelClient, MinimalEngine
 
 
+# Each param is a zero-arg factory that builds a fresh engine. Classes are
+# valid factories (``MinimalEngine()``); engines needing constructor args use
+# a lambda. B.2 pins the deterministic NumPy backend (``use_sdgx=False``) for
+# the reproducibility contract — sdgx/CTGAN is not bit-for-bit reproducible
+# across machines (design §2).
 @pytest.fixture(
-    params=[MinimalEngine],
-    ids=lambda cls: cls.__name__,
+    params=[
+        pytest.param(MinimalEngine, id="MinimalEngine"),
+        pytest.param(B1RagEngine, id="B1RagEngine"),
+        pytest.param(lambda: B2LibraryEngine(use_sdgx=False), id="B2LibraryEngine"),
+    ],
 )
 def engine_class(request):
-    """The engine class under test.
+    """A zero-arg factory for the engine under test.
 
     Extend `params` when new engines land:
-        params=[MinimalEngine, B1RagEngine, B2LibraryEngine]
+        pytest.param(lambda: B1RagEngine(...), id="B1RagEngine")
     """
     return request.param
 
