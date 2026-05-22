@@ -20,8 +20,9 @@ Substitution markers (workflow 3 seds these at import time):
   {{SDFB_VALIDATION_RUNS_TABLE}} project.synthetic_data_quality.validation_runs
 
 Runtime values: Airflow DAG params ({{ params.* }}: table_fqn, num_rows,
-engine, batch_size, similarity) + Composer Variables for infra (PROJECT_ID,
-REGION, DATAFLOW_SUBNET, SA_DATAFLOW) — changeable without re-importing.
+engine, batch_size, similarity, client_type) + Composer Variables for infra
+(PROJECT_ID, REGION, DATAFLOW_SUBNET, SA_DATAFLOW) — changeable without
+re-importing. client_type=fake selects a CPU smoke (no L4) — see below.
 
 Network tag literals (devnetproxy / netsegcloudegress / artifactory / gke /
 dataflow) are copied verbatim from the pe-btr-producer-scala-beam mediation
@@ -111,6 +112,14 @@ default_dag_params = {
         type="string",
         description="Similarity to reference (0.0 random → 1.0 mimic).",
     ),
+    "client_type": Param(
+        default="vllm",
+        type="string",
+        enum=["vllm", "fake"],
+        description="vllm = real Gemma 4 on an L4 GPU worker; fake = CPU smoke "
+                    "(no GPU, e2 machine) that exercises the full "
+                    "Dataflow→BigQuery write path while L4 capacity is short.",
+    ),
 }
 
 with models.DAG(
@@ -140,8 +149,12 @@ with models.DAG(
                         "use_runner_v2",
                         "upload_graph",
                         "enable_secure_boot",
-                        # L4 GPU worker — see docs/GPU_CONTAINER.md.
-                        "worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver",
+                        # L4 GPU only (see docs/GPU_CONTAINER.md). In fake/CPU
+                        # smoke mode this renders to a harmless duplicate of an
+                        # existing experiment, so NO accelerator is requested
+                        # (Dataflow dedupes it) — lets the BQ write path run on
+                        # abundant CPU capacity when L4s are stocked out.
+                        "{{ 'worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver' if params.client_type == 'vllm' else 'upload_graph' }}",
                         f"use_network_tags={network_tags_chain}",
                         f"use_network_tags_for_flex_templates={network_tags_chain}",
                     ],
@@ -150,7 +163,7 @@ with models.DAG(
                         "env": env_name,
                         "dag": dag_id,
                     },
-                    "machineType": "g2-standard-8",
+                    "machineType": "{{ 'g2-standard-8' if params.client_type == 'vllm' else 'e2-standard-8' }}",
                     "maxWorkers": 4,
                     "diskSizeGb": 200,
                     "workerRegion": region,
@@ -170,7 +183,7 @@ with models.DAG(
                     "embedder_uri": embedder_uri,
                     "validation_runs_table": validation_runs_table,
                     "env": env_name,
-                    "client_type": "vllm",
+                    "client_type": "{{ params.client_type }}",
                 },
             }
         },

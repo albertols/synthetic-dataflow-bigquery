@@ -192,6 +192,10 @@ def main(argv: list[str] | None = None) -> int:
         reference_table=args.reference_table,
         landing_table=args.landing_table,
         thresholds=thresholds,
+        # A fake-client (CPU smoke) run produces fake data, so failing the job
+        # on the BLOCKER gate is meaningless — keep it informational (the
+        # validation_runs row still records the status). Real engines gate.
+        fail_on_blocker=args.client_type != "fake",
     )
 
     landing_sink = WriteToBigQuery(
