@@ -57,22 +57,30 @@ jobs:
           BRANCH_NAME: ${{ github.ref_name }}
         run: |
           set -e
+          # GOOGLE_PROJECT_DBC = landing-zone/CI project (only the lz-deploy SA can
+          # read its ARTIFACTORY_* secrets). APP_PROJECT_ID = the runtime app
+          # project (mirrors workflow 3's PROJECT_ID); its ARTIFACTORY_* secret
+          # copies are the ones the Dataflow worker SA can read — so the worker
+          # image-pull creds MUST reference APP_PROJECT_ID, not GOOGLE_PROJECT_DBC.
           if [[ ${BRANCH_NAME} == RELEASE_dbc_prd ]]; then
             echo "ENV_NAME=prd"                                              >> $GITHUB_ENV
             echo "KEYS_PROJECT_ID=the_keys"                >> $GITHUB_ENV
             echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_PRD }}"  >> $GITHUB_OUTPUT
+            echo "APP_PROJECT_ID=the-prd-project"                            >> $GITHUB_OUTPUT
             echo "SERVICE_ACCOUNT_STRING=prd/sdlc-ro-sa"                     >> $GITHUB_OUTPUT
             echo "DEPLOY_SERVICE_ACCOUNT_STRING=prd/lz-deploy"               >> $GITHUB_OUTPUT
           elif [[ ${BRANCH_NAME} == RELEASE_dbc_uat ]]; then
             echo "ENV_NAME=uat"                                              >> $GITHUB_ENV
             echo "KEYS_PROJECT_ID=the_keys"                >> $GITHUB_ENV
             echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_UAT }}"  >> $GITHUB_OUTPUT
+            echo "APP_PROJECT_ID=the-uat-project"                            >> $GITHUB_OUTPUT
             echo "SERVICE_ACCOUNT_STRING=uat/lz-deploy"                      >> $GITHUB_OUTPUT
             echo "DEPLOY_SERVICE_ACCOUNT_STRING=uat/lz-deploy"               >> $GITHUB_OUTPUT
           else
             echo "ENV_NAME=dev"                                              >> $GITHUB_ENV
             echo "KEYS_PROJECT_ID=the_keys"                >> $GITHUB_ENV
             echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_DEV }}"  >> $GITHUB_OUTPUT
+            echo "APP_PROJECT_ID=the-dev-project"                            >> $GITHUB_OUTPUT
             echo "SERVICE_ACCOUNT_STRING=dev/lz-deploy"                      >> $GITHUB_OUTPUT
             echo "DEPLOY_SERVICE_ACCOUNT_STRING=dev/lz-deploy"               >> $GITHUB_OUTPUT
           fi
@@ -125,7 +133,13 @@ jobs:
 
       - name: "Build ${{ env.BUILD_TYPE }} flex-template for env: ${{ env.ENV_NAME }}"
         env:
-          PROJECT_ID: ${{ steps.environment.outputs.GOOGLE_PROJECT_DBC }}
+          # The Dataflow WORKER pulls this image as dataflow-sa-controller@<app>,
+          # which can only read the ARTIFACTORY_* secrets in the APP project — NOT
+          # the landing-zone GOOGLE_PROJECT_DBC copy (readable only by the CI
+          # lz-deploy SA). Pointing the pull creds at GOOGLE_PROJECT_DBC makes the
+          # worker pull 403 (the launcher pull worked, masking it). DEVELOPER
+          # (read-only) creds are sufficient to pull. See m1-e2e-status memory.
+          APP_PROJECT_ID: ${{ steps.environment.outputs.APP_PROJECT_ID }}
         run: |-
           IMG="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${IMAGE_NAME}:${RELEASE_VERSION}"
           echo "Creating Dataflow Flex Template at: ${DF_TEMPLATE_PATH}"
@@ -133,8 +147,8 @@ jobs:
 
           gcloud dataflow flex-template build "${DF_TEMPLATE_PATH}" \
             --image="${IMG}" \
-            --image-repository-username-secret-id="projects/${PROJECT_ID}/secrets/ARTIFACTORY_RELEASER_USERNAME" \
-            --image-repository-password-secret-id="projects/${PROJECT_ID}/secrets/ARTIFACTORY_RELEASER_PASSWORD" \
+            --image-repository-username-secret-id="projects/${APP_PROJECT_ID}/secrets/ARTIFACTORY_DEVELOPER_USERNAME" \
+            --image-repository-password-secret-id="projects/${APP_PROJECT_ID}/secrets/ARTIFACTORY_DEVELOPER_PASSWORD" \
             --sdk-language=PYTHON \
             --staging-location="gs://db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/staging" \
             --temp-location="gs://db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/temp" \
