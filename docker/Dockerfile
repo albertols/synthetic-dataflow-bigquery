@@ -74,31 +74,18 @@ RUN pip install --no-cache-dir \
 
 WORKDIR /workspace
 
-# Install into the base image's GLOBAL Python env (/usr/local), NOT a venv.
-# Beam >= 2.44 *workers* build their own virtualenv from the global env when the
-# custom container starts and DISCARD any venv the image created — so a
-# /workspace/.venv + PYTHONPATH bridge is invisible to the worker SDK harness and
-# DoFn unpickling dies with `ModuleNotFoundError: No module named 'sdfb_core'`.
-# Google: "install dependencies into the default (global) Python environment
-# instead of creating a virtual environment" (Build custom container images for
-# Dataflow). `--inexact` (below) keeps the base image's pre-installed
-# apache-beam + /opt/apache/beam/boot deps — uv installs/updates only what the
-# lockfile manages and never prunes the rest.
-ENV UV_PROJECT_ENVIRONMENT=/usr/local
-
 # Layer-cache strategy: pyprojects + lockfile first.
 COPY pyproject.toml uv.lock README.md ./
 COPY packages/sdfb-core/pyproject.toml packages/sdfb-core/pyproject.toml
 COPY packages/sdfb-beam/pyproject.toml packages/sdfb-beam/pyproject.toml
 COPY packages/sdfb-tests/pyproject.toml packages/sdfb-tests/pyproject.toml
 
-# vLLM/torch wheels bundle their own CUDA runtime libs — no system CUDA needed;
-# the NVIDIA driver is mounted by Dataflow at runtime. The workspace members are
-# installed editable here (finders written now, src COPY'd below) so the launcher
-# and the worker's system-site-packages venv both resolve them from /usr/local.
-# FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE stays UNSET so the launcher reuses this
-# pre-baked env.
-RUN uv sync --frozen --no-dev --all-packages --inexact \
+# Install all deps into the uv venv (/workspace/.venv). vLLM/torch wheels bundle
+# their own CUDA runtime libs — no system CUDA needed; the NVIDIA driver is
+# mounted by Dataflow at runtime. FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE stays
+# UNSET so the launcher reuses this pre-baked env. The venv is bridged into the
+# GLOBAL site dir further down so the worker harness sees it too (bridge .pth).
+RUN uv sync --frozen --no-dev --all-packages \
         --extra gpu --extra embedding --extra library
 
 # Source last (changes here don't invalidate the deps layer).
@@ -109,11 +96,20 @@ COPY packages/sdfb-beam/src packages/sdfb-beam/src
 # --thresholds_uri to config/thresholds.yml). Also ships the bq_schemas.
 COPY config config
 
-# No PYTHONPATH bridge: sdfb-core/sdfb-beam are editable-installed into the
-# global env (/usr/local) above, so /usr/local/lib/python3.11/site-packages —
-# always on sys.path for both the launcher and the worker's boot venv — resolves
-# them. A PYTHONPATH/venv bridge is explicitly unreliable on workers (see the
-# `uv sync` note above), which is what caused the worker ModuleNotFoundError.
+# Two execution contexts import sdfb-core/sdfb-beam, both from /workspace/.venv:
+#   - LAUNCHER (`python run_pipeline.py`): honors PYTHONPATH, so the venv
+#     site-packages + the editable src dirs go on it directly.
+#   - WORKER: Beam >= 2.44 builds its OWN --system-site-packages venv at startup
+#     and DISCARDS the container's venv + PYTHONPATH (Google "Build custom
+#     container images for Dataflow"). It does inherit the GLOBAL site dir and
+#     processes its .pth files — so a bridge .pth there runs site.addsitedir() on
+#     our venv, activating the deps AND the editable sdfb-* finders. That is what
+#     resolves the worker `ModuleNotFoundError: No module named 'sdfb_core'`.
+ENV PYTHONPATH="/workspace/.venv/lib/python3.11/site-packages:/workspace/packages/sdfb-core/src:/workspace/packages/sdfb-beam/src"
+RUN SITE="$(python -c 'import site; print(site.getsitepackages()[0])')" \
+    && printf "import site; site.addsitedir('/workspace/.venv/lib/python3.11/site-packages')\n" \
+        > "${SITE}/zz_sdfb_bridge.pth" \
+    && echo "Wrote worker bridge .pth -> ${SITE}/zz_sdfb_bridge.pth"
 
 # NVIDIA driver mount point (populated by Dataflow's install-nvidia-driver).
 ENV LD_LIBRARY_PATH="/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}" \

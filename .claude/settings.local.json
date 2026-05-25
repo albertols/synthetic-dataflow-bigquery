@@ -61,7 +61,12 @@
       "Bash(rg -rn \"synthetic_beam_bigquery|composer\" packages/ --glob '*test*')",
       "Bash(rg -rn \"synthetic_beam_bigquery|additionalExperiments|automatically_use_created_reservation|dataflow_service_options\" --glob '*.py' packages/)",
       "Bash(xargs rg -l \"synthetic_beam_bigquery|probe_gpu\")",
-      "WebFetch(domain:tjwebb.medium.com)"
+      "WebFetch(domain:tjwebb.medium.com)",
+      "Bash(uv build *)",
+      "Bash(python3 -c \"import zipfile,glob; w=sorted\\(glob.glob\\('dist/sdfb_core-*.whl'\\)\\)[-1]; print\\('\\\\n'.join\\(n for n in zipfile.ZipFile\\(w\\).namelist\\(\\) if n.endswith\\('__init__.py'\\) or 'dist-info/RECORD' in n\\)[:0] or [n for n in zipfile.ZipFile\\(w\\).namelist\\(\\)][:12]\\)\")",
+      "Bash(uv export *)",
+      "Bash(grep -vE \"^#|^\\\\s*$\")",
+      "Bash(echo \"rc=$?\")"
     ]
   }
 }
