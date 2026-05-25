@@ -9,6 +9,7 @@ from apache_beam.options.pipeline_options import (
     GoogleCloudOptions,
     PipelineOptions,
     SetupOptions,
+    WorkerOptions,
 )
 from sdfb_beam.cli.run_pipeline import (
     build_model_client,
@@ -119,3 +120,43 @@ def test_configure_options_preserves_launcher_job_name():
     )
     configure_pipeline_options(opts, "DataflowRunner", "scheduled__bad:name")
     assert opts.view_as(GoogleCloudOptions).job_name == "synthetic-sdfb-vlatest-e48544ec"
+
+
+# --- sdk_container_image: pin Runner v2 workers to THIS image -----------------
+# Without it, Dataflow boots workers on the stock Beam SDK container (no
+# sdfb_core/sdfb_beam) and DoFn unpickling dies with ModuleNotFoundError. The
+# image bakes its own pushed coordinate into SDFB_SDK_CONTAINER_IMAGE so the
+# sha-free Flex Template / DAG never has to carry it.
+
+_IMG = "artifactory.example/dkr-public-local/ns/sdfb-python:main-abc1234"
+
+
+def test_configure_options_dataflow_sets_sdk_container_image_from_env(monkeypatch):
+    monkeypatch.setenv("SDFB_SDK_CONTAINER_IMAGE", _IMG)
+    opts = PipelineOptions(["--runner=DataflowRunner"])
+    configure_pipeline_options(opts, "DataflowRunner", "abc-123")
+    assert opts.view_as(WorkerOptions).sdk_container_image == _IMG
+
+
+def test_configure_options_dataflow_respects_explicit_sdk_container_image(monkeypatch):
+    """An explicit --sdk_container_image (e.g. the probe) must win over the bake."""
+    monkeypatch.setenv("SDFB_SDK_CONTAINER_IMAGE", _IMG)
+    opts = PipelineOptions(
+        ["--runner=DataflowRunner", "--sdk_container_image=other/image:explicit"]
+    )
+    configure_pipeline_options(opts, "DataflowRunner", "abc-123")
+    assert opts.view_as(WorkerOptions).sdk_container_image == "other/image:explicit"
+
+
+def test_configure_options_directrunner_ignores_sdk_container_image_env(monkeypatch):
+    monkeypatch.setenv("SDFB_SDK_CONTAINER_IMAGE", _IMG)
+    opts = PipelineOptions(["--runner=DirectRunner"])
+    configure_pipeline_options(opts, "DirectRunner", "r1")
+    assert opts.view_as(WorkerOptions).sdk_container_image is None
+
+
+def test_configure_options_dataflow_no_env_leaves_sdk_container_image_unset(monkeypatch):
+    monkeypatch.delenv("SDFB_SDK_CONTAINER_IMAGE", raising=False)
+    opts = PipelineOptions(["--runner=DataflowRunner"])
+    configure_pipeline_options(opts, "DataflowRunner", "abc-123")
+    assert opts.view_as(WorkerOptions).sdk_container_image is None

@@ -146,6 +146,7 @@ jobs:
                   --build-arg ARTIFACTORY_HOSTNAME_ARG=$ARTIFACTORY_HOSTNAME \
                   --build-arg ARTIFACTORY_RELEASER_USERNAME_ARG=$ARTIFACTORY_RELEASER_USERNAME \
                   --build-arg ARTIFACTORY_RELEASER_PWD_ARG=$ARTIFACTORY_RELEASER_PASSWORD \
+                  --build-arg SDFB_SDK_CONTAINER_IMAGE_ARG=$IMG:$RELEASE_VERSION \
                   .
                   # --build-arg LAUNCHER_IMAGE=$ARTIFACTORY_HOSTNAME/<mirror>/dataflow-templates-base/python311-template-launcher-base \
                 

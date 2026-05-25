@@ -60,7 +60,8 @@
       "WebFetch(domain:docs.vllm.ai)",
       "Bash(rg -rn \"synthetic_beam_bigquery|composer\" packages/ --glob '*test*')",
       "Bash(rg -rn \"synthetic_beam_bigquery|additionalExperiments|automatically_use_created_reservation|dataflow_service_options\" --glob '*.py' packages/)",
-      "Bash(xargs rg -l \"synthetic_beam_bigquery|probe_gpu\")"
+      "Bash(xargs rg -l \"synthetic_beam_bigquery|probe_gpu\")",
+      "WebFetch(domain:tjwebb.medium.com)"
     ]
   }
 }

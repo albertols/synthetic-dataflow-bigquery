@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from typing import TYPE_CHECKING
@@ -37,6 +38,7 @@ from apache_beam.options.pipeline_options import (
     PipelineOptions,
     SetupOptions,
     StandardOptions,
+    WorkerOptions,
 )
 from sdfb_core.contracts import TableSchema
 from sdfb_core.validation import Thresholds
@@ -140,12 +142,26 @@ def configure_pipeline_options(
     The flex launcher already passes a valid ``--job_name`` (from the DAG's
     ``jobName``), so we only synthesize one — sanitized from ``run_id`` — when
     it's absent (e.g. a direct DataflowRunner launch).
+
+    ``sdk_container_image`` pins Runner v2 *workers* to THIS image. The Flex
+    Template's ``--image`` only sets the *launcher*; the worker harness image
+    must be set separately (Flex Templates can't bake a default — see Google's
+    "Configure Flex Templates"). The image bakes its own pushed coordinate into
+    ``SDFB_SDK_CONTAINER_IMAGE`` (``docker/Dockerfile``) so the sha-free template
+    + Composer DAG never have to carry it. Without this, workers boot the stock
+    Beam SDK container (no ``sdfb_core``/``sdfb_beam``) and DoFn unpickling dies
+    with ``ModuleNotFoundError: No module named 'sdfb_core'``. An explicit
+    ``--sdk_container_image`` (e.g. ``scripts/probe_gpu_dataflow.sh``) wins.
     """
     options.view_as(SetupOptions).save_main_session = runner == "DirectRunner"
     if runner == "DataflowRunner":
         gco = options.view_as(GoogleCloudOptions)
         if not gco.job_name:
             gco.job_name = sanitize_job_name("sdfb", run_id)
+        worker_options = options.view_as(WorkerOptions)
+        sdk_image = os.environ.get("SDFB_SDK_CONTAINER_IMAGE")
+        if sdk_image and not worker_options.sdk_container_image:
+            worker_options.sdk_container_image = sdk_image
 
 
 def main(argv: list[str] | None = None) -> int:

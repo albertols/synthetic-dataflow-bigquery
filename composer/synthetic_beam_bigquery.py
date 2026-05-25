@@ -122,7 +122,7 @@ default_dag_params = {
                     "capacity is short.",
     ),
     "gpu": Param(
-        default="l4",
+        default="t4",
         type="string",
         enum=["l4", "t4"],
         description="GPU profile when client_type=vllm. l4 = g2-standard-8 + "
