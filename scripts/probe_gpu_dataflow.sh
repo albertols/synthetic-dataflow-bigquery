@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 1-row Dataflow GPU probe — confirms an L4 worker boots from the
+# 1-row Dataflow GPU probe — confirms a GPU worker (L4 by default, T4
+# selectable via GPU_MACHINE_TYPE/GPU_ACCELERATOR) boots from the
 # CI-published image and a single Beam bundle runs to completion.
 #
 # IMPORTANT: this script does NOT build anything. The image must already
@@ -26,6 +27,15 @@ set -euo pipefail
 : "${GCP_REGION:?Set GCP_REGION in .envrc (e.g. europe-west3)}"
 : "${GCP_ZONE:?Set GCP_ZONE in .envrc (e.g. europe-west3-b)}"
 
+# GPU target — defaults to L4/g2 (the only europe-west3 GPU that runs Gemma 4).
+# For a real-GPU PLUMBING smoke on abundant N1/T4 capacity (Gemma 4 CANNOT run
+# on a T4 — Turing SM 7.5; pair with a small Turing-compatible model), override:
+#   GPU_MACHINE_TYPE=n1-standard-8 \
+#   GPU_ACCELERATOR='type:nvidia-tesla-t4;count:1;install-nvidia-driver:5xx' \
+#   GCP_ZONE=europe-west3-b ./scripts/probe_gpu_dataflow.sh
+GPU_MACHINE_TYPE="${GPU_MACHINE_TYPE:-g2-standard-8}"
+GPU_ACCELERATOR="${GPU_ACCELERATOR:-type:nvidia-l4;count:1;install-nvidia-driver}"
+
 VERSION="${1:-$(git rev-parse --short HEAD)}"
 PROJECT="$(gcloud config get-value project)"
 JOB_NAME="sdfb-probe-$(date +%s)"
@@ -35,6 +45,8 @@ echo "==> Probe target"
 echo "    Project: ${PROJECT}"
 echo "    Region:  ${GCP_REGION}"
 echo "    Zone:    ${GCP_ZONE}"
+echo "    Machine: ${GPU_MACHINE_TYPE}"
+echo "    GPU:     ${GPU_ACCELERATOR}"
 echo "    Image:   ${IMAGE}"
 echo "    Job:     ${JOB_NAME}"
 
@@ -61,10 +73,15 @@ options = PipelineOptions([
     "--project=${PROJECT}",
     "--region=${GCP_REGION}",
     "--worker_zone=${GCP_ZONE}",
-    "--worker_machine_type=g2-standard-8",
+    "--worker_machine_type=${GPU_MACHINE_TYPE}",
     "--sdk_container_image=${IMAGE}",
     "--experiments=use_runner_v2",
-    "--dataflow_service_options=worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver",
+    "--dataflow_service_options=worker_accelerator=${GPU_ACCELERATOR}",
+    # Consume a matching L4 reservation if one exists (capacity guarantee vs the
+    # europe-west3 g2 STOCKOUT). ANY-reservation affinity → on-demand fallback
+    # when none matches, so it's inert until a reservation is created. Beam
+    # accumulates repeated --dataflow_service_options into a list.
+    "--dataflow_service_options=automatically_use_created_reservation",
     "--worker_disk_type=compute.googleapis.com/projects/${PROJECT}/regions/${GCP_REGION}/diskTypes/pd-ssd",
     "--worker_disk_size_gb=200",
     "--temp_location=gs://${PROJECT}-dataflow/temp",

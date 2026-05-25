@@ -116,9 +116,22 @@ default_dag_params = {
         default="vllm",
         type="string",
         enum=["vllm", "fake"],
-        description="vllm = real Gemma 4 on an L4 GPU worker; fake = CPU smoke "
-                    "(no GPU, e2 machine) that exercises the full "
-                    "Dataflow→BigQuery write path while L4 capacity is short.",
+        description="vllm = real LLM on a GPU worker (GPU chosen by the `gpu` "
+                    "param); fake = CPU smoke (no GPU, e2 machine) that "
+                    "exercises the full Dataflow→BigQuery write path while L4 "
+                    "capacity is short.",
+    ),
+    "gpu": Param(
+        default="l4",
+        type="string",
+        enum=["l4", "t4"],
+        description="GPU profile when client_type=vllm. l4 = g2-standard-8 + "
+                    "NVIDIA L4 (24GB) — the ONLY GPU in europe-west3 that runs "
+                    "Gemma 4. t4 = n1-standard-8 + NVIDIA T4 (16GB), a real-GPU "
+                    "PLUMBING smoke only: Gemma 4 CANNOT run on T4 (Turing "
+                    "SM 7.5, attention head_size 512 > shared-mem ceiling — "
+                    "vLLM #38918), so pair t4 with a small Turing-compatible "
+                    "model. Ignored when client_type=fake.",
     ),
 }
 
@@ -149,12 +162,28 @@ with models.DAG(
                         "use_runner_v2",
                         "upload_graph",
                         "enable_secure_boot",
-                        # L4 GPU only (see docs/GPU_CONTAINER.md). In fake/CPU
-                        # smoke mode this renders to a harmless duplicate of an
-                        # existing experiment, so NO accelerator is requested
-                        # (Dataflow dedupes it) — lets the BQ write path run on
-                        # abundant CPU capacity when L4s are stocked out.
-                        "{{ 'worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver' if params.client_type == 'vllm' else 'upload_graph' }}",
+                        # GPU accelerator, chosen by the `gpu` param when
+                        # client_type=vllm (see docs/GPU_CONTAINER.md):
+                        #   l4 → NVIDIA L4 (Gemma-4-capable),
+                        #   t4 → NVIDIA T4 (plumbing smoke ONLY — Gemma 4 can't
+                        #        run on Turing; see the `gpu` param docstring).
+                        # The T4 profile pins `:5xx`, the driver the Dataflow
+                        # vLLM notebook says is required to run vLLM jobs. In
+                        # fake/CPU smoke mode this renders to a harmless
+                        # duplicate of an existing experiment, so NO accelerator
+                        # is requested (Dataflow dedupes it) — lets the BQ write
+                        # path run on abundant CPU capacity when L4s are stocked
+                        # out.
+                        "{{ ('worker_accelerator=type:nvidia-l4;count:1;install-nvidia-driver' if params.gpu == 'l4' else 'worker_accelerator=type:nvidia-tesla-t4;count:1;install-nvidia-driver:5xx') if params.client_type == 'vllm' else 'upload_graph' }}",
+                        # Capacity guarantee against the europe-west3 g2/L4
+                        # STOCKOUT: consume a matching L4 reservation if one
+                        # exists. ANY-reservation affinity → on-demand fallback
+                        # when none matches, so this is INERT until the platform
+                        # team creates the reservation (and an allowlist is
+                        # granted for GPU-targeted Dataflow reservations). Rides
+                        # additionalExperiments — the same proven channel as
+                        # worker_accelerator above. CPU smoke path: harmless dup.
+                        "{{ 'automatically_use_created_reservation' if params.client_type == 'vllm' else 'upload_graph' }}",
                         f"use_network_tags={network_tags_chain}",
                         f"use_network_tags_for_flex_templates={network_tags_chain}",
                     ],
@@ -163,7 +192,7 @@ with models.DAG(
                         "env": env_name,
                         "dag": dag_id,
                     },
-                    "machineType": "{{ 'g2-standard-8' if params.client_type == 'vllm' else 'e2-standard-8' }}",
+                    "machineType": "{{ ('g2-standard-8' if params.gpu == 'l4' else 'n1-standard-8') if params.client_type == 'vllm' else 'e2-standard-8' }}",
                     "maxWorkers": 4,
                     "diskSizeGb": 200,
                     "workerRegion": region,
