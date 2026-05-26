@@ -29,8 +29,9 @@ env:
   PROJECT_BUCKET_SUFFIX: "<PROJECT_BUCKET_SUFFIX>"
   REGION: "europe-west3"
   BUILD_TYPE: ${{ inputs.BUILD_TYPE || 'Development' }}
-  # All-AR (ADR 0015): the Flex Template launcher image is the same Artifact
-  # Registry image the workers use; JFrog no longer hosts the sdfb image.
+  # Runtime pull = AR only (ADR 0015): the Flex Template launcher image is the same
+  # Artifact Registry image the workers use. Workflow 1 also pushes a copy to JFrog
+  # for archival, but the template never references it (workers can't pull JFrog).
   AR_LOCATION: "europe-west3"
   AR_REPO: "sdfb-dataflow"
 
@@ -135,10 +136,11 @@ jobs:
 
       - name: "Build ${{ env.BUILD_TYPE }} flex-template for env: ${{ env.ENV_NAME }}"
         env:
-          # All-AR (ADR 0015): the launcher --image AND the worker
+          # Runtime pull = AR only (ADR 0015): the launcher --image AND the worker
           # sdk_container_image (baked in workflow 1) are the SAME Artifact Registry
-          # image, pulled via the runtime SA's IAM — no JFrog, no imageRepository
-          # pull-secret. dataflow-sa-controller@<app> needs roles/artifactregistry.reader
+          # image, pulled via the runtime SA's IAM — no JFrog pull, no imageRepository
+          # pull-secret (workflow 1 also pushes a JFrog copy, but it is never pulled at
+          # runtime). dataflow-sa-controller@<app> needs roles/artifactregistry.reader
           # on ${AR_REPO} (covers BOTH the launcher VM pull and the worker pod pull).
           APP_PROJECT_ID: ${{ steps.environment.outputs.APP_PROJECT_ID }}
         run: |-

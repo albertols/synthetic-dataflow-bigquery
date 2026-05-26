@@ -67,7 +67,8 @@
       "Bash(uv export *)",
       "Bash(grep -vE \"^#|^\\\\s*$\")",
       "Bash(echo \"rc=$?\")",
-      "Bash(grep -nE 'AR_LOCATION|AR_REPO|AR_PROJECT_ID|AR_IMG|configure-docker|SDFB_SDK_CONTAINER_IMAGE_ARG=\\\\$AR_IMG' .github/workflows/1_build_python_beam.yaml)"
+      "Bash(grep -nE 'AR_LOCATION|AR_REPO|AR_PROJECT_ID|AR_IMG|configure-docker|SDFB_SDK_CONTAINER_IMAGE_ARG=\\\\$AR_IMG' .github/workflows/1_build_python_beam.yaml)",
+      "Bash(python3 *)"
     ]
   }
 }
