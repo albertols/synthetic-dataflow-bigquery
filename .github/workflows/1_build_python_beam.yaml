@@ -150,7 +150,7 @@ jobs:
       - name: "Build sdfb-beam wheel"
         run: uv build --package sdfb-beam --wheel --out-dir dist
 
-      - name: "Build ${{ env.BUILD_TYPE }} image for env: ${{ env.ENV_NAME }}"
+      - name: "Build ${{ env.BUILD_TYPE }} image + push to JFrog for env: ${{ env.ENV_NAME }}"
         env:
           ARTIFACTORY_RELEASER_USERNAME: ${{ steps.get-secrets.outputs.artifactory_release_username }}
           ARTIFACTORY_RELEASER_PASSWORD: ${{ steps.get-secrets.outputs.artifactory_release_password }}
@@ -158,7 +158,10 @@ jobs:
         run: |-
           # Proxy bypass for the internal JFrog — the Beam SDK BASE image is PULLED
           # from JFrog during the build, and the built image is PUSHED there too
-          # (mirrors scala build.yaml lines 191-196).
+          # (mirrors scala build.yaml lines 191-196). The blank is scoped to THIS
+          # step ON PURPOSE: it also cuts egress to GitHub/Google, which breaks the
+          # gcloud WIF credential helper — so the Artifact Registry push lives in its
+          # OWN step below (fresh shell, proxy intact). See that step's comment.
           export no_proxy="${no_proxy},${ARTIFACTORY_HOSTNAME}"
           export NO_PROXY="${NO_PROXY},${ARTIFACTORY_HOSTNAME}"
           export HTTPS_PROXY="" https_proxy="" HTTP_PROXY="" http_proxy=""
@@ -174,22 +177,21 @@ jobs:
           echo "${ARTIFACTORY_RELEASER_PASSWORD}" | docker login --password-stdin \
               --username "${ARTIFACTORY_RELEASER_USERNAME}" "${ARTIFACTORY_BASE_URL}/"
 
-          # Auth docker to Artifact Registry (the other push target) via the CI SA's IAM.
-          gcloud auth configure-docker "${AR_LOCATION}-docker.pkg.dev" --quiet
-
           # Flex launcher base defaults to gcr.io — if ARC runners cannot reach
           # gcr.io, uncomment the --build-arg LAUNCHER_IMAGE override below with the
-          # JFrog-mirrored path (see ADR 0012). Tag the SAME build for BOTH registries.
-          # The baked SDFB_SDK_CONTAINER_IMAGE_ARG stays the AR coordinate: the
-          # Dataflow worker can ONLY pull via kubelet+worker-SA IAM (AR), never a
-          # 3rd-party JFrog registry (ADR 0015) — so AR, not JFrog, is the runtime
-          # pull source for both the worker and the launcher.
+          # JFrog-mirrored path (see ADR 0012). Tag the SAME build for BOTH registries
+          # (AR push happens in the next step). The baked SDFB_SDK_CONTAINER_IMAGE_ARG
+          # stays the AR coordinate: the Dataflow worker can ONLY pull via
+          # kubelet+worker-SA IAM (AR), never a 3rd-party JFrog registry (ADR 0015) —
+          # so AR, not JFrog, is the runtime pull source for both worker and launcher.
+          # --cache-from points at JFrog: it is the only registry reachable here (the
+          # proxy is blanked, so AR is unreachable in this step).
           DOCKER_BUILDKIT=1 docker build \
             --platform=linux/amd64 \
             -f docker/Dockerfile \
             -t "$AR_IMG:$RELEASE_VERSION" \
             -t "$JFROG_IMG:$RELEASE_VERSION" \
-            --cache-from "$AR_IMG:$RELEASE_VERSION" \
+            --cache-from "$JFROG_IMG:$RELEASE_VERSION" \
             --build-arg ENV_NAME_ARG=$ENV_NAME \
             --build-arg ARTIFACTORY_HOSTNAME_ARG=$ARTIFACTORY_HOSTNAME \
             --build-arg ARTIFACTORY_RELEASER_USERNAME_ARG=$ARTIFACTORY_RELEASER_USERNAME \
@@ -200,16 +202,39 @@ jobs:
 
           docker images | head -20
 
-          # Push the SAME image to BOTH registries with the versioned :<branch>-<sha>
-          # tag (never :latest). Prereqs (one-time, Terraform/IAM):
+          # Push to JFrog (write-once, versioned :<branch>-<sha>, never :latest).
+          # Prereq: JFrog releaser creds have write to dkr-public-local.
+          echo "Pushing → ${JFROG_IMG}:${RELEASE_VERSION}"
+          docker push "${JFROG_IMG}:${RELEASE_VERSION}"
+
+      - name: "Push worker/launcher image to Artifact Registry - ${{ env.ENV_NAME }}"
+        env:
+          AR_PROJECT_ID: ${{ steps.environment.outputs.APP_PROJECT_ID }}
+        run: |-
+          # SEPARATE step ON PURPOSE. The build step above blanks HTTPS_PROXY to
+          # bypass the corporate proxy for the internal JFrog. That same blank also
+          # cuts egress to GitHub/Google, which breaks `docker push` to AR: its
+          # docker-credential-gcloud helper re-mints the push token via Workload
+          # Identity Federation — it must reach the GitHub OIDC endpoint AND Google
+          # STS THROUGH the corporate proxy. Under the blanked proxy that refresh
+          # timed out ("gcloud.auth.docker-helper … connect timeout …
+          # githubusercontent.com"). A fresh step inherits the runner's default
+          # proxy, so WIF egress works and the AR push succeeds.
+          AR_IMG="${AR_LOCATION}-docker.pkg.dev/${AR_PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}"
+
+          echo "== gcloud identity (post-WIF auth) =="
+          gcloud auth list --format="table(account,status)" || true
+          echo "Active project: $(gcloud config get-value project 2>/dev/null || true)"
+
+          echo "== Configuring docker credHelper for ${AR_LOCATION}-docker.pkg.dev =="
+          gcloud auth configure-docker "${AR_LOCATION}-docker.pkg.dev" --quiet
+
+          # Prereqs (one-time, Terraform/IAM):
           #   - AR Docker repo ${AR_REPO} in ${AR_PROJECT_ID}/${AR_LOCATION}
           #   - this CI SA: roles/artifactregistry.writer on ${AR_REPO}
           #   - dataflow-sa-controller@<app>: roles/artifactregistry.reader (launcher + worker)
-          #   - JFrog releaser creds: write to dkr-public-local
           echo "Pushing → ${AR_IMG}:${RELEASE_VERSION}"
           docker push "${AR_IMG}:${RELEASE_VERSION}"
-          echo "Pushing → ${JFROG_IMG}:${RELEASE_VERSION}"
-          docker push "${JFROG_IMG}:${RELEASE_VERSION}"
 
       - name: "Push wheel to JFrog pypi (optional)"
         if: ${{ inputs.push_to_artifactory }}

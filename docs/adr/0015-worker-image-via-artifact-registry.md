@@ -1,6 +1,14 @@
 # ADR 0015 — Dataflow worker image served via Artifact Registry (amends ADR 0003)
 
-- **Status**: accepted (2026-05-26) — amends [ADR 0003](0003-jfrog-image-registry.md); relates to [ADR 0009](0009-single-flex-template-image.md), [ADR 0012](0012-enterprise-image-build.md)
+- **Status**: accepted (2026-05-26), amended (2026-05-26 — dual-push) — amends [ADR 0003](0003-jfrog-image-registry.md); relates to [ADR 0009](0009-single-flex-template-image.md), [ADR 0012](0012-enterprise-image-build.md)
+
+## Amendment (2026-05-26) — JFrog archival copy reinstated
+
+The original decision below pushed the image to **Artifact Registry only**. Workflow 1 now pushes the *same* image to **both** JFrog `dkr-public-local` (archival / registry-of-record, the immutable `:<branch>-<sha>` tag) **and** Artifact Registry, in a single `docker build` with two tags.
+
+This does **not** change the runtime-pull conclusion that is the whole point of this ADR: the Dataflow **worker** (`sdk_container_image`) and the Flex Template **launcher** (`--image`) still pull from **AR only**, via the runtime SA's IAM — a 3rd-party JFrog pull still 403s on the worker kubelet pod (see Context). The JFrog copy is an additional artifact store, never a runtime pull source. So everywhere the Decision/Consequences below say the image lives "only" in AR, read it as **"the runtime pull source is AR only"**; storage is now dual.
+
+Added prerequisite: the CI JFrog releaser creds must keep write access to `dkr-public-local` (write-once — only fresh `:<branch>-<sha>` tags, never `:latest`).
 
 ## Context
 
