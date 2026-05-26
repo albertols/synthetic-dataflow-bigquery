@@ -47,3 +47,4 @@ Keep ADRs tight — half a page is plenty. Detail belongs in the code or in skil
 - [0012 — Enterprise-network constraints for the GPU image build + Dataflow run](0012-enterprise-image-build.md)
 - [0013 — Synthesis engines use an LLM-as-distribution-estimator spine](0013-distribution-estimator-spine.md)
 - [0014 — `VLLMModelClient` owns the vLLM OpenAI server (amends 0011)](0014-vllm-model-client-owns-server.md)
+- [0015 — Dataflow worker image served via Artifact Registry (amends 0003)](0015-worker-image-via-artifact-registry.md)

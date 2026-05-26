@@ -66,7 +66,8 @@
       "Bash(python3 -c \"import zipfile,glob; w=sorted\\(glob.glob\\('dist/sdfb_core-*.whl'\\)\\)[-1]; print\\('\\\\n'.join\\(n for n in zipfile.ZipFile\\(w\\).namelist\\(\\) if n.endswith\\('__init__.py'\\) or 'dist-info/RECORD' in n\\)[:0] or [n for n in zipfile.ZipFile\\(w\\).namelist\\(\\)][:12]\\)\")",
       "Bash(uv export *)",
       "Bash(grep -vE \"^#|^\\\\s*$\")",
-      "Bash(echo \"rc=$?\")"
+      "Bash(echo \"rc=$?\")",
+      "Bash(grep -nE 'AR_LOCATION|AR_REPO|AR_PROJECT_ID|AR_IMG|configure-docker|SDFB_SDK_CONTAINER_IMAGE_ARG=\\\\$AR_IMG' .github/workflows/1_build_python_beam.yaml)"
     ]
   }
 }

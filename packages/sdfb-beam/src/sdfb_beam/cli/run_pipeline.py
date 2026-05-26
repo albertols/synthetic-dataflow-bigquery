@@ -160,8 +160,23 @@ def configure_pipeline_options(
             gco.job_name = sanitize_job_name("sdfb", run_id)
         worker_options = options.view_as(WorkerOptions)
         sdk_image = os.environ.get("SDFB_SDK_CONTAINER_IMAGE")
-        if sdk_image and not worker_options.sdk_container_image:
+        if worker_options.sdk_container_image:
+            logger.info(
+                "Worker sdk_container_image already set explicitly (%s); leaving as-is "
+                "(SDFB_SDK_CONTAINER_IMAGE=%s ignored).",
+                worker_options.sdk_container_image, sdk_image or "<unset>",
+            )
+        elif sdk_image:
             worker_options.sdk_container_image = sdk_image
+            logger.info("Pinned worker sdk_container_image to %s (from SDFB_SDK_CONTAINER_IMAGE).",
+                        sdk_image)
+        else:
+            logger.warning(
+                "Neither --sdk_container_image nor SDFB_SDK_CONTAINER_IMAGE is set; Dataflow "
+                "Runner v2 workers will fall back to the stock Beam SDK container (no sdfb_core/"
+                "sdfb_beam) and DoFn unpickling will fail. Bake it in docker/Dockerfile or pass "
+                "--sdk_container_image explicitly.",
+            )
 
 
 def main(argv: list[str] | None = None) -> int:

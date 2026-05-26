@@ -25,12 +25,14 @@ on:
         required: false
 
 env:
-  ARTIFACTORY_HOSTNAME: "<ARTIFACTORY_HOSTNAME>"
-  ARTIFACTORY_NAMESPACE: "<ARTIFACTORY_NAMESPACE>"
   IMAGE_NAME: "sdfb-python"
   PROJECT_BUCKET_SUFFIX: "<PROJECT_BUCKET_SUFFIX>"
   REGION: "europe-west3"
   BUILD_TYPE: ${{ inputs.BUILD_TYPE || 'Development' }}
+  # All-AR (ADR 0015): the Flex Template launcher image is the same Artifact
+  # Registry image the workers use; JFrog no longer hosts the sdfb image.
+  AR_LOCATION: "europe-west3"
+  AR_REPO: "sdfb-dataflow"
 
 permissions:
   id-token: write
@@ -133,22 +135,19 @@ jobs:
 
       - name: "Build ${{ env.BUILD_TYPE }} flex-template for env: ${{ env.ENV_NAME }}"
         env:
-          # The Dataflow WORKER pulls this image as dataflow-sa-controller@<app>,
-          # which can only read the ARTIFACTORY_* secrets in the APP project — NOT
-          # the landing-zone GOOGLE_PROJECT_DBC copy (readable only by the CI
-          # lz-deploy SA). Pointing the pull creds at GOOGLE_PROJECT_DBC makes the
-          # worker pull 403 (the launcher pull worked, masking it). DEVELOPER
-          # (read-only) creds are sufficient to pull. See m1-e2e-status memory.
+          # All-AR (ADR 0015): the launcher --image AND the worker
+          # sdk_container_image (baked in workflow 1) are the SAME Artifact Registry
+          # image, pulled via the runtime SA's IAM — no JFrog, no imageRepository
+          # pull-secret. dataflow-sa-controller@<app> needs roles/artifactregistry.reader
+          # on ${AR_REPO} (covers BOTH the launcher VM pull and the worker pod pull).
           APP_PROJECT_ID: ${{ steps.environment.outputs.APP_PROJECT_ID }}
         run: |-
-          IMG="${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${IMAGE_NAME}:${RELEASE_VERSION}"
+          AR_IMG="${AR_LOCATION}-docker.pkg.dev/${APP_PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}"
           echo "Creating Dataflow Flex Template at: ${DF_TEMPLATE_PATH}"
-          echo "Backing image: ${IMG}"
+          echo "Backing image (launcher + worker): ${AR_IMG}:${RELEASE_VERSION}"
 
           gcloud dataflow flex-template build "${DF_TEMPLATE_PATH}" \
-            --image="${IMG}" \
-            --image-repository-username-secret-id="projects/${APP_PROJECT_ID}/secrets/ARTIFACTORY_DEVELOPER_USERNAME" \
-            --image-repository-password-secret-id="projects/${APP_PROJECT_ID}/secrets/ARTIFACTORY_DEVELOPER_PASSWORD" \
+            --image="${AR_IMG}:${RELEASE_VERSION}" \
             --sdk-language=PYTHON \
             --staging-location="gs://db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/staging" \
             --temp-location="gs://db-${ENV_NAME}-${PROJECT_BUCKET_SUFFIX}-dataflow-staging/temp" \
